@@ -135,6 +135,27 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # ========================================================================
+# Tests
+# ========================================================================
+enable_testing()
+
+file(GLOB_RECURSE SLATE_CORE_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/App/Slate/*.cpp"
+)
+list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/UI/.*")
+
+add_executable(SlateCoreTests
+    tests/SlateCoreTests.cpp
+    ${SLATE_CORE_SOURCES}
+)
+
+target_include_directories(SlateCoreTests PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
+add_test(NAME SlateCoreTests COMMAND SlateCoreTests)
+
+# ========================================================================
 # Platform-Specific Linking
 # ========================================================================
 if(WIN32)

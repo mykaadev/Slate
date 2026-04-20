@@ -6,8 +6,35 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
+#include <cstdio>
+#include <utility>
+
 namespace Software::Platform
 {
+    namespace
+    {
+        void TryLoadFont(ImGuiIO& io, const char* path)
+        {
+            if (io.Fonts->Fonts.Size > 0)
+            {
+                return;
+            }
+
+            FILE* file = nullptr;
+#if defined(_MSC_VER)
+            fopen_s(&file, path, "rb");
+#else
+            file = fopen(path, "rb");
+#endif
+            if (!file)
+            {
+                return;
+            }
+            fclose(file);
+            io.Fonts->AddFontFromFileTTF(path, 18.0f);
+        }
+    }
+
     bool PlatformLayer::Initialize()
     {
         if (!glfwInit())
@@ -35,7 +62,19 @@ namespace Software::Platform
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+        TryLoadFont(io, "C:/Windows/Fonts/CascadiaMono.ttf");
+        TryLoadFont(io, "C:/Windows/Fonts/CascadiaCode.ttf");
+        TryLoadFont(io, "C:/Windows/Fonts/consola.ttf");
+
         ImGui::StyleColorsDark();
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowRounding = 0.0f;
+        style.FrameRounding = 2.0f;
+        style.PopupRounding = 2.0f;
+        style.ScrollbarRounding = 2.0f;
+        style.WindowBorderSize = 0.0f;
+        style.FrameBorderSize = 0.0f;
 
         ImGui_ImplGlfw_InitForOpenGL(m_window, true);
         ImGui_ImplOpenGL3_Init("#version 130");
@@ -98,6 +137,11 @@ namespace Software::Platform
         m_router = router;
     }
 
+    void PlatformLayer::SetFileDropCallback(std::function<void(std::vector<std::string>)> callback)
+    {
+        m_dropCallback = std::move(callback);
+    }
+
     void PlatformLayer::InstallCallbacks()
     {
         m_prevCursorPos = glfwSetCursorPosCallback(m_window, [](GLFWwindow* window, double x, double y) {
@@ -145,6 +189,14 @@ namespace Software::Platform
             if (self)
             {
                 self->HandleKey(key, scancode, action, mods);
+            }
+        });
+
+        glfwSetDropCallback(m_window, [](GLFWwindow* window, int count, const char** paths) {
+            auto* self = static_cast<PlatformLayer*>(glfwGetWindowUserPointer(window));
+            if (self)
+            {
+                self->HandleDrop(count, paths);
             }
         });
     }
@@ -228,5 +280,28 @@ namespace Software::Platform
                                             : Software::Core::Runtime::InputAction::Release;
         event.mods = mods;
         m_router->OnKey(event);
+    }
+
+    void PlatformLayer::HandleDrop(int count, const char** paths)
+    {
+        if (!m_dropCallback || count <= 0 || !paths)
+        {
+            return;
+        }
+
+        std::vector<std::string> files;
+        files.reserve(static_cast<std::size_t>(count));
+        for (int i = 0; i < count; ++i)
+        {
+            if (paths[i])
+            {
+                files.emplace_back(paths[i]);
+            }
+        }
+
+        if (!files.empty())
+        {
+            m_dropCallback(std::move(files));
+        }
     }
 }

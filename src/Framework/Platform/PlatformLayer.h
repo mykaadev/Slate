@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <string>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 #include "imgui.h"
@@ -35,6 +37,9 @@ namespace Software::Platform
         /** Assigns the input router used to dispatch events. */
         void SetInputRouter(Software::Core::Runtime::InputRouter* router);
 
+        /** Assigns the callback used to report files dropped onto the window. */
+        void SetFileDropCallback(std::function<void(std::vector<std::string>)> callback);
+
         // Functions
     private:
         /** Installs GLFW callbacks for input handling. */
@@ -54,6 +59,9 @@ namespace Software::Platform
 
         /** Handles key events. */
         void HandleKey(int key, int scancode, int action, int mods);
+
+        /** Handles files dropped onto the window. */
+        void HandleDrop(int count, const char** paths);
 
         // Variables
     private:
@@ -77,5 +85,8 @@ namespace Software::Platform
 
         /** Cached last mouse position. */
         ImVec2 m_lastMousePos{0.0f, 0.0f};
+
+        /** Optional callback receiving dropped file paths. */
+        std::function<void(std::vector<std::string>)> m_dropCallback;
     };
 }

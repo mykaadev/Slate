@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "Core/Runtime/EventBus.h"
 #include "Core/Runtime/ServiceLocator.h"
@@ -40,5 +42,11 @@ namespace Software::Core::Runtime
 
         /** Timing data for the frame. */
         FrameInfo frame;
+
+        /** Set by modes/tools when the application should close after the frame. */
+        bool quitRequested = false;
+
+        /** File paths dropped onto the native window during the current session. */
+        std::vector<std::string>* droppedFiles = nullptr;
     };
 }
