@@ -1,0 +1,42 @@
+# === Build artifacts ===
+/build/
+/bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# === IDE/Editor files ===
+.vscode/
+.idea/
+
+# === OS clutter ===
+.DS_Store
+Thumbs.db
+
+# === ImGui and GLFW intermediates (safe since they're submodules) ===
+external/imgui/.vs/
+external/imgui/.idea/
+external/imgui/.DS_Store
+external/glfw/.vs/
+external/glfw/.idea/
+external/glfw/.DS_Store
+
+# === Executables ===
+*.exe
+*.out
+*.app
+
+# === Logs / temporary ===
+*.log
+*.tmp
+
+# === User-specific config ===
+*.user
+*.suo
+*.vcxproj.*
+# === CMake FetchContent / build folders ===
+/_deps/
+/out/
+/cmake-build-*/
+CMakeUserPresets.json
