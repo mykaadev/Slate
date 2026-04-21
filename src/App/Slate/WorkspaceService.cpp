@@ -561,13 +561,38 @@ namespace Software::Slate
 
     bool WorkspaceService::EnsureInsideWorkspace(const fs::path& path, std::string* error) const
     {
-        if (!PathUtils::IsSubPath(m_root, path))
+        std::error_code ec;
+        const fs::path canonicalRoot = fs::weakly_canonical(m_root, ec);
+        if (ec)
+        {
+            if (error)
+            {
+                *error = "Workspace path is invalid.";
+            }
+            return false;
+        }
+
+        const fs::path normalizedPath = path.lexically_normal();
+        const fs::path relative = normalizedPath.lexically_relative(canonicalRoot);
+        if (relative.empty() || relative.is_absolute())
         {
             if (error)
             {
                 *error = "Path escapes the workspace.";
             }
             return false;
+        }
+
+        for (const auto& part : relative)
+        {
+            if (part == "..")
+            {
+                if (error)
+                {
+                    *error = "Path escapes the workspace.";
+                }
+                return false;
+            }
         }
         return true;
     }
@@ -577,3 +602,5 @@ namespace Software::Slate
         return m_root / ".slate";
     }
 }
+
+

@@ -152,3 +152,5 @@ namespace Software::Slate::PathUtils
         return ss.str();
     }
 }
+
+

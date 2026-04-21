@@ -5,6 +5,8 @@
 #include "imgui.h"
 
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace Software::Slate::UI
 {
@@ -44,7 +46,13 @@ namespace Software::Slate::UI
                                              ImGuiInputTextFlags flags, int* cursorPos = nullptr);
     void TextCentered(const char* text, const ImVec4& color = Primary);
     void TextLine(const char* key, const char* label);
+    float ShortcutTextWidth(std::string_view text);
+    void DrawShortcutText(std::string_view text, const ImVec4& keyColor = Amber, const ImVec4& labelColor = Primary);
+    void DrawShortcutTextCentered(std::string_view text, const ImVec4& keyColor = Amber,
+                                  const ImVec4& labelColor = Primary);
     bool ContainsFilter(const std::string& value, const char* filter);
     bool IsShiftQuestion();
     std::string DisplayNameForTreeRow(const TreeViewRow& row);
+    void DrawInlineSpans(const std::vector<MarkdownInlineSpan>& spans, const ImVec4& baseColor = Primary);
+    void DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter = false);
 }
