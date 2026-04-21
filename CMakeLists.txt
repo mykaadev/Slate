@@ -136,7 +136,7 @@ file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
 set(SLATE_APP_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/app/icon.ico")
 if(WIN32 AND EXISTS "${SLATE_APP_ICON_PATH}")
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/App/Resources")
-    file(TO_NATIVE_PATH "${SLATE_APP_ICON_PATH}" SLATE_APP_ICON_PATH_NATIVE)
+    set(SLATE_APP_ICON_PATH_RC "${SLATE_APP_ICON_PATH}")
     configure_file(
         "${CMAKE_SOURCE_DIR}/src/App/Resources/WindowsApp.rc.in"
         "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc"
