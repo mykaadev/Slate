@@ -27,3 +27,18 @@ cmake --build build -j
 ```
 
 On Windows (Visual Studio generator), select your configuration and run the produced exe in `build/bin/`.
+
+## Portable Zip
+
+Build a portable Windows zip with:
+
+```bash
+cmake -S . -B build
+cmake --build build --config Release --target portable
+```
+
+The packaged zip is written to `build/portable/`.
+
+On Windows, the main app now builds as a GUI executable, so launching it does not open a separate console window.
+
+To add an app icon, place a multi-size `.ico` file at `assets/app/icon.ico`, then rerun configure/build. The icon is embedded into the Windows executable automatically.

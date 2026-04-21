@@ -18,6 +18,11 @@ project(${SOFTWARE_TARGET_NAME} VERSION ${SOFTWARE_APP_VERSION} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+    # Static runtime keeps the portable build down to the app itself.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # Set binary output directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
@@ -32,6 +37,10 @@ include(FetchContent)
 # -------------------------
 # GLFW (Window + Input)
 # -------------------------
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "Disable GLFW docs" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "Disable GLFW install rules" FORCE)
 FetchContent_Declare(
     glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -124,7 +133,25 @@ file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/Modes/*.cpp"
 )
 
-add_executable(${PROJECT_NAME} ${APP_SOURCES})
+set(SLATE_APP_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/app/icon.ico")
+if(WIN32 AND EXISTS "${SLATE_APP_ICON_PATH}")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/App/Resources")
+    file(TO_NATIVE_PATH "${SLATE_APP_ICON_PATH}" SLATE_APP_ICON_PATH_NATIVE)
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/src/App/Resources/WindowsApp.rc.in"
+        "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc"
+        @ONLY
+    )
+    list(APPEND APP_SOURCES "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc")
+elseif(WIN32)
+    message(STATUS "No Windows app icon found at ${SLATE_APP_ICON_PATH}; building without an embedded icon.")
+endif()
+
+if(WIN32)
+    add_executable(${PROJECT_NAME} WIN32 ${APP_SOURCES})
+else()
+    add_executable(${PROJECT_NAME} ${APP_SOURCES})
+endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
@@ -160,9 +187,34 @@ add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)
 # Platform-Specific Linking
 # ========================================================================
 if(WIN32)
+    target_link_libraries(SoftwareFramework PRIVATE dwmapi)
     target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
 elseif(APPLE)
     find_library(COCOA_FRAMEWORK Cocoa)
     find_library(OPENGL_FRAMEWORK OpenGL)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK})
 endif()
+
+# ========================================================================
+# Portable Packaging
+# ========================================================================
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION "."
+)
+
+install(FILES
+    "${CMAKE_SOURCE_DIR}/README.md"
+    DESTINATION "docs"
+)
+
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_OUTPUT_FILE_PREFIX "${CMAKE_BINARY_DIR}/portable")
+set(CPACK_PACKAGE_FILE_NAME "${SOFTWARE_TARGET_NAME}-${SOFTWARE_APP_VERSION}-windows-portable")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+include(CPack)
+
+add_custom_target(portable
+    COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake" -C $<CONFIG>
+    DEPENDS ${PROJECT_NAME}
+    COMMENT "Building portable zip"
+)

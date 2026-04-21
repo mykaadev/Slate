@@ -2,6 +2,13 @@
 
 #include "Core/Runtime/AppConfig.h"
 
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#include <Windows.h>
+#include <dwmapi.h>
+#endif
+
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
@@ -13,6 +20,59 @@ namespace Software::Platform
 {
     namespace
     {
+#if defined(_WIN32)
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+        constexpr DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+#endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+        constexpr DWORD DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+#endif
+#ifndef DWMWA_BORDER_COLOR
+        constexpr DWORD DWMWA_BORDER_COLOR = 34;
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+        constexpr DWORD DWMWA_CAPTION_COLOR = 35;
+#endif
+#ifndef DWMWA_TEXT_COLOR
+        constexpr DWORD DWMWA_TEXT_COLOR = 36;
+#endif
+#ifndef DWMWCP_DONOTROUND
+        enum DWM_WINDOW_CORNER_PREFERENCE
+        {
+            DWMWCP_DEFAULT = 0,
+            DWMWCP_DONOTROUND = 1,
+            DWMWCP_ROUND = 2,
+            DWMWCP_ROUNDSMALL = 3
+        };
+#endif
+
+        void ApplySlateWindowFrame(GLFWwindow* window)
+        {
+            if (!window)
+            {
+                return;
+            }
+
+            HWND hwnd = glfwGetWin32Window(window);
+            if (!hwnd)
+            {
+                return;
+            }
+
+            const BOOL darkMode = TRUE;
+            const COLORREF captionColor = RGB(22, 22, 20);
+            const COLORREF textColor = RGB(219, 214, 196);
+            const COLORREF borderColor = RGB(43, 43, 39);
+            const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
+
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
+            DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &captionColor, sizeof(captionColor));
+            DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &textColor, sizeof(textColor));
+            DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &borderColor, sizeof(borderColor));
+            DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+        }
+#endif
+
         void TryLoadFont(ImGuiIO& io, const char* path)
         {
             if (io.Fonts->Fonts.Size > 0)
@@ -56,8 +116,9 @@ namespace Software::Platform
         glfwMakeContextCurrent(m_window);
         glfwSwapInterval(1);
 
-
-
+#if defined(_WIN32)
+        ApplySlateWindowFrame(m_window);
+#endif
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
