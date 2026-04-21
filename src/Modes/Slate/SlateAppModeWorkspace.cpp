@@ -29,10 +29,20 @@ namespace Software::Modes::Slate
         }
         m_documents.SetWorkspaceRoot(m_workspace.Root());
         m_assets.SetWorkspaceRoot(m_workspace.Root());
+        m_theme.SetWorkspaceRoot(m_workspace.Root());
         CollapseAllWorkspaceFolders();
+        m_journalSummaryValid = false;
         m_search.Rebuild(m_workspace);
         m_lastIndexSeconds = 0.0;
         m_workspaceLoaded = true;
+
+        std::string themeError;
+        m_themeSettings = Software::Slate::ThemeService::DefaultSettings();
+        if (!m_theme.Load(&m_themeSettings, &themeError))
+        {
+            SetError(themeError);
+        }
+        m_theme.Apply(m_themeSettings);
         SetStatus("workspace opened: " + m_workspace.Root().string());
     }
 

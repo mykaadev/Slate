@@ -3,10 +3,12 @@
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
 #include "App/Slate/EditorDocumentViewModel.h"
+#include "App/Slate/JournalService.h"
 #include "App/Slate/LinkService.h"
 #include "App/Slate/MarkdownService.h"
 #include "App/Slate/NavigationController.h"
 #include "App/Slate/SearchService.h"
+#include "App/Slate/ThemeService.h"
 #include "App/Slate/WorkspaceService.h"
 #include "App/Slate/WorkspaceRegistryService.h"
 #include "App/Slate/WorkspaceTree.h"
@@ -34,6 +36,7 @@ namespace Software::Modes::Slate
             Home,
             WorkspaceSetup,
             WorkspaceSwitcher,
+            Settings,
             Editor,
             QuickOpen,
             FileTree,
@@ -124,7 +127,11 @@ namespace Software::Modes::Slate
         void DrawHome(Software::Core::Runtime::AppContext& context);
         void DrawWorkspaceSetup();
         void DrawWorkspaceSwitcher();
+        void DrawSettings();
         void DrawEditor(Software::Core::Runtime::AppContext& context);
+        void DrawJournalCompanion(const Software::Slate::DocumentService::Document& document);
+        void DrawJournalCalendar(const Software::Slate::JournalMonthSummary& summary);
+        void DrawJournalActivityGraph(const Software::Slate::JournalMonthSummary& summary);
         void DrawLiveMarkdownEditor(Software::Slate::DocumentService::Document& document,
                                     Software::Core::Runtime::AppContext& context);
         void DrawInlineSpans(const std::vector<Software::Slate::MarkdownInlineSpan>& spans, const ImVec4& baseColor);
@@ -143,6 +150,7 @@ namespace Software::Modes::Slate
         void HandleGlobalKeys(Software::Core::Runtime::AppContext& context);
         void HandleListKeys();
         void HandleWorkspaceKeys();
+        void HandleSettingsKeys();
         void HandleTreeKeys(bool folderPicker);
         void HandleLibraryKeys();
         void HandleSearchOverlayKeys();
@@ -158,8 +166,10 @@ namespace Software::Modes::Slate
         Software::Slate::DocumentService m_documents;
         Software::Slate::MarkdownService m_markdown;
         Software::Slate::SearchService m_search;
+        Software::Slate::JournalService m_journal;
         Software::Slate::LinkService m_links;
         Software::Slate::AssetService m_assets;
+        Software::Slate::ThemeService m_theme;
         Software::Slate::WorkspaceRegistryService m_workspaceRegistry;
         Software::Slate::NavigationController m_navigation;
         Software::Slate::NavigationController m_searchNavigation;
@@ -202,6 +212,12 @@ namespace Software::Modes::Slate
         FolderPickerAction m_folderPickerAction = FolderPickerAction::None;
         bool m_workspaceLoaded = false;
         bool m_editorTextFocused = false;
+        bool m_journalSummaryValid = false;
+        std::size_t m_journalSummaryTextHash = 0;
+        double m_journalSummaryUpdatedSeconds = 0.0;
+        Software::Slate::fs::path m_journalSummaryPath;
+        Software::Slate::JournalMonthSummary m_journalSummary;
+        Software::Slate::ThemeSettings m_themeSettings = Software::Slate::ThemeService::DefaultSettings();
         double m_lastScanSeconds = 0.0;
         double m_lastIndexSeconds = 0.0;
         double m_nowSeconds = 0.0;

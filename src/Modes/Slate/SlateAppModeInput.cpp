@@ -43,6 +43,12 @@ namespace Software::Modes::Slate
             return;
         }
 
+        if (m_screen == Screen::Help && IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_screen = m_returnScreen;
+            return;
+        }
+
         if (io.KeyShift && IsKeyPressed(ImGuiKey_Semicolon))
         {
             BeginPrompt(PromptAction::Command, "command", "");
@@ -260,6 +266,91 @@ namespace Software::Modes::Slate
             m_workspaceNavigation.SetCount(m_workspaceRegistry.Vaults().size());
             m_workspaceNavigation.Reset();
             m_screen = Screen::WorkspaceSwitcher;
+        }
+        else if (IsKeyPressed(ImGuiKey_T))
+        {
+            m_navigation.SetCount(2);
+            m_navigation.Reset();
+            m_screen = Screen::Settings;
+        }
+    }
+
+    void SlateAppMode::HandleSettingsKeys()
+    {
+        const auto cycle = [](const std::vector<std::string>& ids, const std::string& current, int delta) {
+            auto it = std::find(ids.begin(), ids.end(), current);
+            std::size_t index = it == ids.end() ? 0 : static_cast<std::size_t>(it - ids.begin());
+            const std::size_t count = ids.size();
+            if (count == 0)
+            {
+                return current;
+            }
+
+            const int next = static_cast<int>(index) + delta;
+            index = static_cast<std::size_t>((next % static_cast<int>(count) + static_cast<int>(count)) %
+                                             static_cast<int>(count));
+            return ids[index];
+        };
+
+        auto applyAndSave = [this]() {
+            m_theme.Apply(m_themeSettings);
+            std::string error;
+            if (!m_theme.Save(m_themeSettings, &error))
+            {
+                SetError(error);
+            }
+            else
+            {
+                SetStatus("theme updated");
+            }
+        };
+
+        m_navigation.SetCount(2);
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        {
+            m_navigation.MoveNext();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        {
+            m_navigation.MovePrevious();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+        {
+            if (m_navigation.Selected() == 0)
+            {
+                m_themeSettings.shellPreset =
+                    cycle(Software::Slate::ThemeService::ShellPresetIds(), m_themeSettings.shellPreset, -1);
+            }
+            else
+            {
+                m_themeSettings.markdownPreset =
+                    cycle(Software::Slate::ThemeService::MarkdownPresetIds(), m_themeSettings.markdownPreset, -1);
+            }
+            applyAndSave();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) || IsKeyPressed(ImGuiKey_Enter) ||
+            IsKeyPressed(ImGuiKey_KeypadEnter))
+        {
+            if (m_navigation.Selected() == 0)
+            {
+                m_themeSettings.shellPreset =
+                    cycle(Software::Slate::ThemeService::ShellPresetIds(), m_themeSettings.shellPreset, 1);
+            }
+            else
+            {
+                m_themeSettings.markdownPreset =
+                    cycle(Software::Slate::ThemeService::MarkdownPresetIds(), m_themeSettings.markdownPreset, 1);
+            }
+            applyAndSave();
+        }
+        if (IsKeyPressed(ImGuiKey_R))
+        {
+            m_themeSettings = Software::Slate::ThemeService::DefaultSettings();
+            applyAndSave();
+        }
+        if (IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_screen = Screen::Home;
         }
     }
 

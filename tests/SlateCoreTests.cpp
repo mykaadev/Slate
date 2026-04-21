@@ -1,10 +1,13 @@
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
 #include "App/Slate/EditorDocumentViewModel.h"
+#include "App/Slate/JournalService.h"
 #include "App/Slate/LinkService.h"
 #include "App/Slate/MarkdownService.h"
 #include "App/Slate/NavigationController.h"
 #include "App/Slate/SearchService.h"
+#include "App/Slate/ThemeService.h"
+#include "App/Slate/UI/SlateUi.h"
 #include "App/Slate/WorkspaceService.h"
 #include "App/Slate/WorkspaceRegistryService.h"
 #include "App/Slate/WorkspaceTree.h"
@@ -309,6 +312,42 @@ namespace
         fs::remove_all(root);
     }
 
+    void TestJournalMonthSummary()
+    {
+        const fs::path root = MakeTempWorkspace();
+        WriteFile(root / "Journal" / "2026" / "04" / "2026-04-01.md", "# 2026-04-01\n\n- ");
+        WriteFile(root / "Journal" / "2026" / "04" / "2026-04-02.md", "# 2026-04-02\n\n- Walked outside\n");
+        WriteFile(root / "Journal" / "2026" / "04" / "2026-04-03.md", "# 2026-04-03\n\n- Read a chapter\n- Felt better\n");
+        WriteFile(root / "Journal" / "2026" / "03" / "2026-03-31.md", "# 2026-03-31\n\n- Previous month\n");
+        WriteFile(root / "Docs" / "Plan.md", "# Plan\n");
+
+        Software::Slate::WorkspaceService workspace(root);
+        Software::Slate::JournalService journal;
+
+        CHECK(journal.IsJournalPath("Journal/2026/04/2026-04-02.md"));
+        CHECK(!journal.IsJournalPath("Docs/Plan.md"));
+        CHECK(journal.HasMeaningfulContent("# 2026-04-02\n\n- Walked outside\n"));
+        CHECK(!journal.HasMeaningfulContent("# 2026-04-01\n\n- "));
+
+        const std::string activeText = "# 2026-04-01\n\n- Draft note\n";
+        const auto summary =
+            journal.BuildMonthSummary(workspace, 2026, 4, "Journal/2026/04/2026-04-01.md", &activeText);
+        CHECK(summary.year == 2026);
+        CHECK(summary.month == 4);
+        CHECK(summary.daysInMonth == 30);
+        CHECK(summary.firstWeekdayMondayBased == 2);
+        CHECK(summary.writtenDays == 3);
+        CHECK(summary.activeDay == 1);
+        CHECK(summary.activeWordCount >= 2);
+        CHECK(summary.days[0].hasContent);
+        CHECK(summary.days[1].hasContent);
+        CHECK(summary.days[2].hasContent);
+        CHECK(summary.days[0].wordCount >= 2);
+        CHECK(summary.days[1].wordCount >= 2);
+        CHECK(summary.days[2].wordCount >= 5);
+        fs::remove_all(root);
+    }
+
     void TestArrowNavigationController()
     {
         Software::Slate::NavigationController nav;
@@ -412,6 +451,38 @@ namespace
         CHECK(loaded.ActiveVault()->title == "Journal");
         fs::remove_all(root);
     }
+
+    void TestThemeServiceRoundTrip()
+    {
+        const fs::path root = MakeTempWorkspace();
+        Software::Slate::ThemeService theme(root);
+
+        Software::Slate::ThemeSettings settings;
+        settings.shellPreset = "ember-night";
+        settings.markdownPreset = "sunrise-notes";
+        CHECK(theme.Save(settings));
+
+        Software::Slate::ThemeSettings loaded;
+        CHECK(theme.Load(&loaded));
+        CHECK(loaded.shellPreset == "ember-night");
+        CHECK(loaded.markdownPreset == "sunrise-notes");
+        CHECK(fs::exists(root / ".slate" / "theme.tsv"));
+        fs::remove_all(root);
+    }
+
+    void TestThemeServiceApply()
+    {
+        Software::Slate::ThemeService theme;
+        theme.Apply({"pine-night", "quiet-notes"});
+        CHECK(Software::Slate::UI::Background.x == 0.050f);
+        CHECK(Software::Slate::UI::Panel.y == 0.083f);
+        CHECK(Software::Slate::UI::MarkdownHeading1.x == 0.62f);
+        CHECK(Software::Slate::UI::MarkdownImage.x == 0.82f);
+
+        theme.Apply(Software::Slate::ThemeService::DefaultSettings());
+        CHECK(Software::Slate::UI::Background.x == 0.055f);
+        CHECK(Software::Slate::UI::MarkdownHeading1.x == 0.56f);
+    }
 }
 
 int main()
@@ -426,11 +497,14 @@ int main()
     TestTreeFilteringPreservesParents();
     TestCollapsedTreeHidesDescendants();
     TestLibraryTreeExcludesJournalAndPreservesParents();
+    TestJournalMonthSummary();
     TestArrowNavigationController();
     TestEditorDocumentViewModel();
     TestEditorSingleCharacterDeletionDoesNotMergeLines();
     TestMarkdownInlineSpans();
     TestWorkspaceRegistry();
+    TestThemeServiceRoundTrip();
+    TestThemeServiceApply();
     std::cout << "SlateCoreTests passed\n";
     return 0;
 }

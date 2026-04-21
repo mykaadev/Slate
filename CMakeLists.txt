@@ -151,9 +151,10 @@ add_executable(SlateCoreTests
 
 target_include_directories(SlateCoreTests PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
+    ${imgui_SOURCE_DIR}
 )
 
-add_test(NAME SlateCoreTests COMMAND SlateCoreTests)
+add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)
 
 # ========================================================================
 # Platform-Specific Linking

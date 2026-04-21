@@ -6,8 +6,10 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
+#include <functional>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -68,11 +70,26 @@ namespace Software::Modes::Slate
             }
             return Software::Slate::PathUtils::NormalizeRelative(target);
         }
+
+        const char* MonthName(int month)
+        {
+            static constexpr std::array<const char*, 12> Names{{
+                "January", "February", "March",     "April",   "May",      "June",
+                "July",    "August",   "September", "October", "November", "December",
+            }};
+            if (month < 1 || month > 12)
+            {
+                return "Month";
+            }
+            return Names[static_cast<std::size_t>(month - 1)];
+        }
     }
 
     void SlateAppMode::OnEnter(Software::Core::Runtime::AppContext& context)
     {
         (void)context;
+        m_themeSettings = Software::Slate::ThemeService::DefaultSettings();
+        m_theme.Apply(m_themeSettings);
         std::string error;
         if (!m_workspaceRegistry.Load(&error))
         {
@@ -168,6 +185,7 @@ namespace Software::Modes::Slate
             m_editor.Load(document->text, document->lineEnding);
             m_editorTextFocused = true;
         }
+        m_journalSummaryValid = false;
 
         m_workspace.TouchRecent(relativePath);
         m_screen = Screen::Editor;
@@ -493,6 +511,12 @@ namespace Software::Modes::Slate
         {
             m_workspaceNavigation.SetCount(m_workspaceRegistry.Vaults().size());
             m_screen = Screen::WorkspaceSwitcher;
+        }
+        else if (trimmed == "t" || trimmed == "theme" || trimmed == "settings")
+        {
+            m_navigation.SetCount(2);
+            m_navigation.Reset();
+            m_screen = Screen::Settings;
         }
         else if (trimmed == "library" || trimmed == "l" || trimmed == "docs")
         {
@@ -917,6 +941,7 @@ namespace Software::Modes::Slate
             m_editor.Load(document->text, document->lineEnding);
             m_editorTextFocused = true;
         }
+        m_journalSummaryValid = false;
     }
 
     void SlateAppMode::JumpEditorToLine(std::size_t line)
@@ -1012,6 +1037,13 @@ namespace Software::Modes::Slate
             }
             DrawHome(context);
             break;
+        case Screen::Settings:
+            if (handleInput)
+            {
+                HandleSettingsKeys();
+            }
+            DrawSettings();
+            break;
         case Screen::Editor:
             if (handleInput)
             {
@@ -1098,6 +1130,7 @@ namespace Software::Modes::Slate
         TextLine("o", "quick open");
         section("system");
         TextLine("w", "workspaces");
+        TextLine("t", "theme");
         TextLine("?", "shortcuts");
         TextLine("q", "quit");
         ImGui::EndGroup();
@@ -1121,11 +1154,195 @@ namespace Software::Modes::Slate
         ImGui::TextColored(document->conflict ? Red : (document->dirty ? Amber : Green), "%s",
                            document->conflict ? "external change" : (document->dirty ? "dirty" : "saved"));
 
+        if (m_journal.IsJournalPath(document->relativePath))
+        {
+            ImGui::Dummy(ImVec2(1.0f, 10.0f));
+            DrawJournalCompanion(*document);
+            ImGui::Dummy(ImVec2(1.0f, 12.0f));
+        }
+
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         ImGui::BeginChild("LiveMarkdownEditorPage", ImVec2(0.0f, avail.y - 52.0f), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
         DrawLiveMarkdownEditor(*document, context);
         ImGui::EndChild();
+    }
+
+    void SlateAppMode::DrawSettings()
+    {
+        m_navigation.SetCount(2);
+
+        ImGui::TextColored(Cyan, "settings");
+        ImGui::Separator();
+        ImGui::TextColored(Muted, "Theme changes save to this workspace.");
+        ImGui::Dummy(ImVec2(1.0f, 10.0f));
+
+        const bool shellSelected = m_navigation.Selected() == 0;
+        const bool markdownSelected = m_navigation.Selected() == 1;
+        ImGui::TextColored(shellSelected ? Green : Primary, "%s overall theme     %s", shellSelected ? ">" : " ",
+                           Software::Slate::ThemeService::ShellPresetLabel(m_themeSettings.shellPreset).c_str());
+        ImGui::TextColored(markdownSelected ? Green : Primary, "%s markdown colors  %s",
+                           markdownSelected ? ">" : " ",
+                           Software::Slate::ThemeService::MarkdownPresetLabel(m_themeSettings.markdownPreset).c_str());
+
+        ImGui::Dummy(ImVec2(1.0f, 14.0f));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(1.0f, 8.0f));
+        ImGui::TextColored(Muted, "preview");
+        ImGui::Dummy(ImVec2(1.0f, 6.0f));
+
+        bool previewInCodeFence = false;
+        DrawMarkdownLine("# Encounter Notes", previewInCodeFence);
+        DrawMarkdownLine("## Combat Loop", previewInCodeFence);
+        DrawMarkdownLine("- [ ] tune parry window", previewInCodeFence);
+        DrawMarkdownLine("- [x] player dodge feels right", previewInCodeFence);
+        DrawMarkdownLine("> pace matters more than particles", previewInCodeFence);
+        DrawMarkdownLine("A [link](Docs/Combat.md), **bold**, *italic*, and `code`.", previewInCodeFence);
+        DrawMarkdownLine("| stat | value |", previewInCodeFence);
+        DrawMarkdownLine("![](assets/encounter/board.png)", previewInCodeFence);
+    }
+
+    void SlateAppMode::DrawJournalCompanion(const Software::Slate::DocumentService::Document& document)
+    {
+        const std::size_t textHash = std::hash<std::string>{}(document.text);
+        const bool pathChanged = !m_journalSummaryValid || m_journalSummaryPath != document.relativePath;
+        const bool textChanged = !m_journalSummaryValid || m_journalSummaryTextHash != textHash;
+        const bool refreshDue = m_nowSeconds - m_journalSummaryUpdatedSeconds >= (textChanged ? 0.35 : 2.0);
+        if (pathChanged || (textChanged && refreshDue) || (!textChanged && refreshDue))
+        {
+            m_journalSummary = m_journal.BuildCurrentMonthSummary(m_workspace, document.relativePath, &document.text);
+            m_journalSummaryPath = document.relativePath;
+            m_journalSummaryTextHash = textHash;
+            m_journalSummaryUpdatedSeconds = m_nowSeconds;
+            m_journalSummaryValid = true;
+        }
+
+        const auto& summary = m_journalSummary;
+        char title[64];
+        std::snprintf(title, sizeof(title), "%s %d", MonthName(summary.month), summary.year);
+        ImGui::TextColored(Cyan, "%s", title);
+        ImGui::SameLine();
+
+        std::string meta = std::to_string(summary.writtenDays) + " written";
+        meta += "   streak " + std::to_string(summary.currentStreak);
+        if (summary.activeWordCount > 0)
+        {
+            meta += "   " + std::to_string(summary.activeWordCount) + " words";
+        }
+        ImGui::TextColored(Muted, "%s", meta.c_str());
+
+        ImGui::TextColored(Amber, "prompt");
+        ImGui::SameLine();
+        ImGui::TextColored(Primary, "%s", summary.prompt.c_str());
+        ImGui::Dummy(ImVec2(1.0f, 6.0f));
+        DrawJournalCalendar(summary);
+        ImGui::Dummy(ImVec2(1.0f, 8.0f));
+        DrawJournalActivityGraph(summary);
+    }
+
+    void SlateAppMode::DrawJournalCalendar(const Software::Slate::JournalMonthSummary& summary)
+    {
+        static constexpr std::array<const char*, 7> Weekdays{{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}};
+        if (!ImGui::BeginTable("JournalMonthCalendar", 7,
+                               ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings))
+        {
+            return;
+        }
+
+        for (const char* weekday : Weekdays)
+        {
+            ImGui::TableNextColumn();
+            ImGui::TextColored(Muted, "%s", weekday);
+        }
+
+        int cell = 0;
+        int day = 1;
+        while (day <= summary.daysInMonth)
+        {
+            ImGui::TableNextRow();
+            for (int column = 0; column < 7; ++column, ++cell)
+            {
+                ImGui::TableSetColumnIndex(column);
+                if (cell < summary.firstWeekdayMondayBased || day > summary.daysInMonth)
+                {
+                    ImGui::TextUnformatted(" ");
+                    continue;
+                }
+
+                const auto& daySummary = summary.days[static_cast<std::size_t>(day - 1)];
+                ImVec4 dayColor = Primary;
+                if (day == summary.currentDay)
+                {
+                    dayColor = Cyan;
+                }
+                else if (day == summary.activeDay)
+                {
+                    dayColor = Amber;
+                }
+                else if (daySummary.hasContent)
+                {
+                    dayColor = Green;
+                }
+
+                char dayBuffer[8];
+                std::snprintf(dayBuffer, sizeof(dayBuffer), "%2d", day);
+                ImGui::TextColored(dayColor, "%s", dayBuffer);
+                if (daySummary.hasContent)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                    ImGui::TextColored(Green, "x");
+                }
+                ++day;
+            }
+        }
+
+        ImGui::EndTable();
+    }
+
+    void SlateAppMode::DrawJournalActivityGraph(const Software::Slate::JournalMonthSummary& summary)
+    {
+        const float width = std::min(ImGui::GetContentRegionAvail().x, 360.0f);
+        const float barHeight = 42.0f;
+        const float labelHeight = 16.0f;
+        const ImVec2 start = ImGui::GetCursorScreenPos();
+        const ImVec2 size(width, barHeight + labelHeight);
+        ImGui::InvisibleButton("JournalActivityGraph", size);
+
+        auto* drawList = ImGui::GetWindowDrawList();
+        drawList->AddLine(ImVec2(start.x, start.y + barHeight), ImVec2(start.x + width, start.y + barHeight),
+                          ImGui::ColorConvertFloat4ToU32(Muted));
+
+        int maxWords = 0;
+        for (const int value : summary.recentWordCounts)
+        {
+            maxWords = std::max(maxWords, value);
+        }
+
+        const float slotWidth = width / 7.0f;
+        for (int i = 0; i < 7; ++i)
+        {
+            const int dayNumber = summary.recentDayNumbers[static_cast<std::size_t>(i)];
+            const int words = summary.recentWordCounts[static_cast<std::size_t>(i)];
+            const float x0 = start.x + slotWidth * static_cast<float>(i) + 6.0f;
+            const float x1 = start.x + slotWidth * static_cast<float>(i + 1) - 6.0f;
+            const float normalizedHeight = maxWords > 0 ? (static_cast<float>(words) / static_cast<float>(maxWords)) : 0.0f;
+            const float height = words > 0 ? std::max(6.0f, normalizedHeight * (barHeight - 6.0f)) : 2.0f;
+            ImVec4 color = words > 0 ? Green : Muted;
+            if (dayNumber == summary.currentDay && dayNumber > 0)
+            {
+                color = Cyan;
+            }
+
+            drawList->AddRectFilled(ImVec2(x0, start.y + barHeight - height), ImVec2(x1, start.y + barHeight),
+                                    ImGui::ColorConvertFloat4ToU32(color), 2.0f);
+
+            if (dayNumber > 0)
+            {
+                char label[8];
+                std::snprintf(label, sizeof(label), "%d", dayNumber);
+                drawList->AddText(ImVec2(x0, start.y + barHeight + 2.0f), ImGui::ColorConvertFloat4ToU32(Muted), label);
+            }
+        }
     }
 
     void SlateAppMode::DrawLiveMarkdownEditor(Software::Slate::DocumentService::Document& document,
@@ -1287,23 +1504,23 @@ namespace Software::Modes::Slate
             ImVec4 color = baseColor;
             if (span.code)
             {
-                color = Code;
+                color = MarkdownCode;
             }
             else if (span.image)
             {
-                color = Amber;
+                color = MarkdownImage;
             }
             else if (span.link)
             {
-                color = Cyan;
+                color = MarkdownLink;
             }
             else if (span.bold)
             {
-                color = Primary;
+                color = MarkdownBold;
             }
             else if (span.italic)
             {
-                color = Muted;
+                color = MarkdownItalic;
             }
 
             ImGui::TextColored(color, "%s", span.text.c_str());
@@ -1344,11 +1561,11 @@ namespace Software::Modes::Slate
         }
         else if (trimmed.rfind("```", 0) == 0 || trimmed.rfind("~~~", 0) == 0)
         {
-            ImGui::TextColored(Muted, "code");
+            ImGui::TextColored(MarkdownCode, "code");
         }
         else if (inCodeFence)
         {
-            ImGui::TextColored(Code, "%s", line.c_str());
+            ImGui::TextColored(MarkdownCode, "%s", line.c_str());
         }
         else if (trimmed[0] == '#')
         {
@@ -1360,14 +1577,15 @@ namespace Software::Modes::Slate
             const std::string title =
                 Software::Slate::PathUtils::Trim(std::string_view(trimmed).substr(hashes));
             const float scale = hashes == 1 ? 1.42f : (hashes == 2 ? 1.25f : 1.10f);
+            const ImVec4 headingColor = hashes == 1 ? MarkdownHeading1 : (hashes == 2 ? MarkdownHeading2 : MarkdownHeading3);
             ImGui::SetWindowFontScale(scale);
             DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(title.empty() ? "heading" : title),
-                            Cyan);
+                            headingColor);
             ImGui::SetWindowFontScale(1.0f);
         }
         else if (trimmed.rfind("- [ ]", 0) == 0 || trimmed.rfind("* [ ]", 0) == 0)
         {
-            ImGui::TextColored(Amber, "[ ]");
+            ImGui::TextColored(MarkdownCheckbox, "[ ]");
             ImGui::SameLine();
             DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
                                 Software::Slate::PathUtils::Trim(trimmed.substr(5))),
@@ -1376,7 +1594,7 @@ namespace Software::Modes::Slate
         else if (trimmed.rfind("- [x]", 0) == 0 || trimmed.rfind("- [X]", 0) == 0 || trimmed.rfind("* [x]", 0) == 0 ||
                  trimmed.rfind("* [X]", 0) == 0)
         {
-            ImGui::TextColored(Green, "[x]");
+            ImGui::TextColored(MarkdownCheckboxDone, "[x]");
             ImGui::SameLine();
             DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
                                 Software::Slate::PathUtils::Trim(trimmed.substr(5))),
@@ -1384,15 +1602,15 @@ namespace Software::Modes::Slate
         }
         else if (trimmed[0] == '>')
         {
-            ImGui::TextColored(Amber, "|");
+            ImGui::TextColored(MarkdownQuote, "|");
             ImGui::SameLine();
             DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
                                 Software::Slate::PathUtils::Trim(trimmed.substr(1))),
-                            Muted);
+                            MarkdownQuote);
         }
         else if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0 || trimmed.rfind("+ ", 0) == 0)
         {
-            ImGui::TextColored(Amber, "*");
+            ImGui::TextColored(MarkdownBullet, "*");
             ImGui::SameLine();
             DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed.substr(2)), Primary);
         }
@@ -1401,7 +1619,7 @@ namespace Software::Modes::Slate
             const std::size_t dot = trimmed.find(". ");
             if (dot != std::string::npos)
             {
-                ImGui::TextColored(Amber, "%s", trimmed.substr(0, dot + 1).c_str());
+                ImGui::TextColored(MarkdownBullet, "%s", trimmed.substr(0, dot + 1).c_str());
                 ImGui::SameLine();
                 DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed.substr(dot + 2)), Primary);
             }
@@ -1412,7 +1630,7 @@ namespace Software::Modes::Slate
         }
         else if (trimmed.find("![](") != std::string::npos || trimmed.find("![") != std::string::npos)
         {
-            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed), Amber);
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed), MarkdownImage);
         }
         else if (trimmed.find("](") != std::string::npos || trimmed.find("[[") != std::string::npos)
         {
@@ -1420,7 +1638,7 @@ namespace Software::Modes::Slate
         }
         else if (trimmed.find('|') != std::string::npos)
         {
-            ImGui::TextColored(Code, "%s", trimmed.c_str());
+            ImGui::TextColored(MarkdownTable, "%s", trimmed.c_str());
         }
         else
         {
@@ -1667,6 +1885,7 @@ namespace Software::Modes::Slate
         TextLine("^s", "save active document");
         TextLine("n", "new note folder picker");
         TextLine("l", "library");
+        TextLine("t", "theme settings");
         TextLine("a", "create folder in file tree");
         TextLine("w", "switch workspaces");
         TextLine("m", "move/rename selected file or folder with folder picker");
@@ -1734,7 +1953,9 @@ namespace Software::Modes::Slate
         case Screen::WorkspaceSwitcher:
             return "Up/Down choose   Enter switch   n new workspace   d remove from list   Esc home";
         case Screen::Home:
-            return "(j) journal   (n) new   (l) library   (s) search   (?) help";
+            return "(j) journal   (n) new   (l) library   (t) theme   (?) help";
+        case Screen::Settings:
+            return "Up/Down choose   Left/Right change   Enter next   R reset   Esc home";
         case Screen::Editor:
             return "Live Preview   Ctrl+F find   Ctrl+S save   Esc leave editor";
         case Screen::Library:
