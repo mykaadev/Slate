@@ -62,6 +62,8 @@ namespace Software::Platform
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.KeyRepeatDelay = 0.24f;
+        io.KeyRepeatRate = 0.035f;
 
         TryLoadFont(io, "C:/Windows/Fonts/CascadiaMono.ttf");
         TryLoadFont(io, "C:/Windows/Fonts/CascadiaCode.ttf");

@@ -9,13 +9,47 @@ namespace Software::Slate
 {
     namespace
     {
-        bool IsVisibleFileEntry(const WorkspaceEntry& entry, TreeViewMode mode)
+        bool IsJournalPath(const fs::path& path)
         {
-            if (entry.isDirectory)
+            const std::string text = PathUtils::ToLower(PathUtils::NormalizeRelative(path).generic_string());
+            return text == "journal" || text.rfind("journal/", 0) == 0;
+        }
+
+        bool IsLibraryMarkdownFile(const WorkspaceEntry& entry)
+        {
+            return !entry.isDirectory && !IsJournalPath(entry.relativePath) &&
+                   PathUtils::IsMarkdownFile(entry.relativePath);
+        }
+
+        bool HasLibraryDescendant(const std::vector<WorkspaceEntry>& entries, const fs::path& folder)
+        {
+            for (const auto& entry : entries)
             {
-                return true;
+                if (IsLibraryMarkdownFile(entry) && PathIsDescendantOf(entry.relativePath, folder))
+                {
+                    return true;
+                }
             }
-            return mode == TreeViewMode::Files && PathUtils::IsMarkdownFile(entry.relativePath);
+            return false;
+        }
+
+        bool IsVisibleEntry(const std::vector<WorkspaceEntry>& entries, const WorkspaceEntry& entry, TreeViewMode mode)
+        {
+            if (mode == TreeViewMode::Folders)
+            {
+                return entry.isDirectory;
+            }
+
+            if (mode == TreeViewMode::Library)
+            {
+                if (entry.isDirectory)
+                {
+                    return !IsJournalPath(entry.relativePath) && HasLibraryDescendant(entries, entry.relativePath);
+                }
+                return IsLibraryMarkdownFile(entry);
+            }
+
+            return entry.isDirectory || PathUtils::IsMarkdownFile(entry.relativePath);
         }
 
         bool HasCollapsedAncestor(const fs::path& path, const CollapsedFolderSet& collapsedFolders)
@@ -44,7 +78,7 @@ namespace Software::Slate
 
         for (const auto& entry : entries)
         {
-            if (!IsVisibleFileEntry(entry, mode))
+            if (!IsVisibleEntry(entries, entry, mode))
             {
                 continue;
             }
@@ -57,7 +91,7 @@ namespace Software::Slate
             {
                 for (const auto& other : entries)
                 {
-                    if (&other == &entry || !IsVisibleFileEntry(other, mode))
+                    if (&other == &entry || !IsVisibleEntry(entries, other, mode))
                     {
                         continue;
                     }
@@ -83,16 +117,11 @@ namespace Software::Slate
                 continue;
             }
 
-            if (mode == TreeViewMode::Folders && !entry.isDirectory)
-            {
-                continue;
-            }
-
             TreeViewRow row;
             row.relativePath = entry.relativePath;
             row.isDirectory = entry.isDirectory;
             row.depth = entry.depth;
-            row.selectable = mode == TreeViewMode::Folders ? entry.isDirectory : !entry.isDirectory;
+            row.selectable = mode == TreeViewMode::Folders ? entry.isDirectory : true;
             row.matchedFilter = selfMatches && filtering;
             rows.push_back(std::move(row));
         }

@@ -25,9 +25,12 @@ namespace Software::Slate
 
         bool CreateMarkdownFile(const fs::path& relativePath, const std::string& initialText, fs::path* createdPath,
                                 std::string* error = nullptr);
+        bool CreateFolder(const fs::path& folderRelativePath, const std::string& requestedName, fs::path* createdPath,
+                          std::string* error = nullptr);
         bool RenameOrMove(const fs::path& oldRelativePath, const fs::path& newRelativePath, std::string* error = nullptr);
         bool DeletePath(const fs::path& relativePath, std::string* error = nullptr);
         fs::path MakeCollisionSafeMarkdownPath(const fs::path& folderRelativePath, const std::string& requestedName) const;
+        fs::path MakeCollisionSafeFolderPath(const fs::path& folderRelativePath, const std::string& requestedName) const;
 
         fs::path DailyNoteRelativePath() const;
         bool EnsureDailyNote(fs::path* relativePath, std::string* error = nullptr);

@@ -49,8 +49,25 @@ namespace Software::Slate
         fs::path path;
         fs::path relativePath;
         std::size_t line = 0;
+        std::size_t column = 0;
         std::string snippet;
         int score = 0;
+    };
+
+    enum class SearchMode
+    {
+        FileNames,
+        FullText
+    };
+
+    struct MarkdownInlineSpan
+    {
+        std::string text;
+        bool bold = false;
+        bool italic = false;
+        bool code = false;
+        bool link = false;
+        bool image = false;
     };
 
     struct RewriteChange

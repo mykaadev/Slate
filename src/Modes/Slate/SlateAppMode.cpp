@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cfloat>
 #include <cstdio>
 #include <sstream>
 #include <string_view>
@@ -19,32 +18,6 @@ namespace Software::Modes::Slate
 
     namespace
     {
-        constexpr std::size_t InvalidLine = static_cast<std::size_t>(-1);
-
-        std::vector<std::string> EditorLinesFromText(const std::string& text)
-        {
-            auto lines = Software::Slate::MarkdownService::SplitLines(text);
-            if (lines.empty())
-            {
-                lines.emplace_back();
-            }
-            return lines;
-        }
-
-        std::string JoinEditorLines(const std::vector<std::string>& lines, const std::string& lineEnding)
-        {
-            std::string text;
-            for (std::size_t i = 0; i < lines.size(); ++i)
-            {
-                if (i > 0)
-                {
-                    text += lineEnding;
-                }
-                text += lines[i];
-            }
-            return text;
-        }
-
         std::size_t LeadingSpaceCount(const std::string& line)
         {
             std::size_t count = 0;
@@ -55,120 +28,45 @@ namespace Software::Modes::Slate
             return count;
         }
 
-        bool StartsWith(std::string_view value, std::string_view prefix)
+        bool PathEqualsOrDescendantOf(const Software::Slate::fs::path& candidate,
+                                      const Software::Slate::fs::path& root)
         {
-            return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+            const auto normalizedCandidate = Software::Slate::PathUtils::NormalizeRelative(candidate);
+            const auto normalizedRoot = Software::Slate::PathUtils::NormalizeRelative(root);
+            return normalizedCandidate == normalizedRoot ||
+                   Software::Slate::PathIsDescendantOf(normalizedCandidate, normalizedRoot);
         }
 
-        std::string InlineMarkdownText(std::string_view text)
+        Software::Slate::fs::path RebaseRelativePath(const Software::Slate::fs::path& candidate,
+                                                     const Software::Slate::fs::path& oldRoot,
+                                                     const Software::Slate::fs::path& newRoot)
         {
-            std::string out;
-            for (std::size_t i = 0; i < text.size();)
+            const auto normalizedCandidate = Software::Slate::PathUtils::NormalizeRelative(candidate);
+            const auto normalizedOldRoot = Software::Slate::PathUtils::NormalizeRelative(oldRoot);
+            Software::Slate::fs::path tail;
+
+            auto candidateIt = normalizedCandidate.begin();
+            auto oldIt = normalizedOldRoot.begin();
+            for (; oldIt != normalizedOldRoot.end() && candidateIt != normalizedCandidate.end(); ++oldIt, ++candidateIt)
             {
-                if (StartsWith(text.substr(i), "!["))
-                {
-                    const std::size_t closeLabel = text.find(']', i + 2);
-                    if (closeLabel != std::string_view::npos && closeLabel + 1 < text.size() &&
-                        text[closeLabel + 1] == '(')
-                    {
-                        const std::size_t closeTarget = text.find(')', closeLabel + 2);
-                        if (closeTarget != std::string_view::npos)
-                        {
-                            const std::string_view alt = text.substr(i + 2, closeLabel - i - 2);
-                            const std::string_view target = text.substr(closeLabel + 2, closeTarget - closeLabel - 2);
-                            out += "[image";
-                            if (!alt.empty())
-                            {
-                                out += ": ";
-                                out += alt;
-                            }
-                            else if (!target.empty())
-                            {
-                                out += ": ";
-                                out += Software::Slate::fs::path(std::string(target)).filename().string();
-                            }
-                            out += "]";
-                            i = closeTarget + 1;
-                            continue;
-                        }
-                    }
-                }
-
-                if (StartsWith(text.substr(i), "[["))
-                {
-                    const std::size_t close = text.find("]]", i + 2);
-                    if (close != std::string_view::npos)
-                    {
-                        std::string inner(text.substr(i + 2, close - i - 2));
-                        const std::size_t pipe = inner.find('|');
-                        out += pipe == std::string::npos ? inner : inner.substr(pipe + 1);
-                        i = close + 2;
-                        continue;
-                    }
-                }
-
-                if (text[i] == '[')
-                {
-                    const std::size_t closeLabel = text.find(']', i + 1);
-                    if (closeLabel != std::string_view::npos && closeLabel + 1 < text.size() &&
-                        text[closeLabel + 1] == '(')
-                    {
-                        const std::size_t closeTarget = text.find(')', closeLabel + 2);
-                        if (closeTarget != std::string_view::npos)
-                        {
-                            out += text.substr(i + 1, closeLabel - i - 1);
-                            i = closeTarget + 1;
-                            continue;
-                        }
-                    }
-                }
-
-                if (StartsWith(text.substr(i), "**") || StartsWith(text.substr(i), "__"))
-                {
-                    const std::string_view marker = text.substr(i, 2);
-                    const std::size_t close = text.find(marker, i + 2);
-                    if (close != std::string_view::npos)
-                    {
-                        out += text.substr(i + 2, close - i - 2);
-                        i = close + 2;
-                        continue;
-                    }
-                }
-
-                if (text[i] == '`')
-                {
-                    const std::size_t close = text.find('`', i + 1);
-                    if (close != std::string_view::npos)
-                    {
-                        out += text.substr(i + 1, close - i - 1);
-                        i = close + 1;
-                        continue;
-                    }
-                }
-
-                if ((text[i] == '*' || text[i] == '_') && i + 1 < text.size() && text[i + 1] != text[i])
-                {
-                    const char marker = text[i];
-                    const std::size_t close = text.find(marker, i + 1);
-                    if (close != std::string_view::npos)
-                    {
-                        out += text.substr(i + 1, close - i - 1);
-                        i = close + 1;
-                        continue;
-                    }
-                }
-
-                out.push_back(text[i]);
-                ++i;
             }
-            return out;
+            for (; candidateIt != normalizedCandidate.end(); ++candidateIt)
+            {
+                tail /= *candidateIt;
+            }
+            return Software::Slate::PathUtils::NormalizeRelative(
+                Software::Slate::PathUtils::NormalizeRelative(newRoot) / tail);
         }
 
-        void DrawScaledText(const ImVec4& color, float scale, const char* text)
+        Software::Slate::fs::path FinalMoveTargetPath(const Software::Slate::fs::path& source,
+                                                      const Software::Slate::fs::path& requestedTarget)
         {
-            ImGui::SetWindowFontScale(scale);
-            ImGui::TextColored(color, "%s", text);
-            ImGui::SetWindowFontScale(1.0f);
+            auto target = Software::Slate::PathUtils::NormalizeRelative(requestedTarget);
+            if (Software::Slate::PathUtils::IsMarkdownFile(source) && !Software::Slate::PathUtils::IsMarkdownFile(target))
+            {
+                target += ".md";
+            }
+            return Software::Slate::PathUtils::NormalizeRelative(target);
         }
     }
 
@@ -195,6 +93,7 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::Update(Software::Core::Runtime::AppContext& context)
     {
+        m_nowSeconds = context.frame.elapsedSeconds;
         if (context.frame.elapsedSeconds - m_lastScanSeconds > 2.0)
         {
             m_documents.CheckExternalChange();
@@ -251,7 +150,10 @@ namespace Software::Modes::Slate
     {
         if (m_documents.HasOpenDocument())
         {
-            SaveActiveDocument();
+            if (!SaveActiveDocument())
+            {
+                return;
+            }
         }
 
         std::string error;
@@ -263,20 +165,15 @@ namespace Software::Modes::Slate
 
         if (auto* document = m_documents.Active())
         {
-            (void)document;
+            m_editor.Load(document->text, document->lineEnding);
             m_editorTextFocused = true;
-            m_focusEditor = true;
-            m_editorCursorPos = 0;
-            m_editorRequestedCursorPos = 0;
-            m_editorActiveLine = 0;
-            m_editorScratchLine = InvalidLine;
-            m_editorLineText.clear();
         }
 
         m_workspace.TouchRecent(relativePath);
         m_screen = Screen::Editor;
         m_returnScreen = Screen::Home;
         m_folderPickerActive = false;
+        m_folderPickerAction = FolderPickerAction::None;
         CloseSearchOverlay();
         SetStatus("opened " + relativePath.generic_string());
 
@@ -314,13 +211,33 @@ namespace Software::Modes::Slate
         }
         m_search.Rebuild(m_workspace);
         m_folderPickerActive = false;
+        m_folderPickerAction = FolderPickerAction::None;
         OpenDocument(created);
+    }
+
+    void SlateAppMode::CreateNewFolder(const std::string& value)
+    {
+        Software::Slate::fs::path created;
+        std::string error;
+        if (!m_workspace.CreateFolder(m_pendingFolderPath, value, &created, &error))
+        {
+            SetError(error);
+            m_screen = Screen::FileTree;
+            return;
+        }
+
+        m_collapsedFolders.erase(Software::Slate::TreePathKey(m_pendingFolderPath));
+        m_collapsedFolders.insert(Software::Slate::TreePathKey(created));
+        m_search.Rebuild(m_workspace);
+        m_screen = Screen::FileTree;
+        SetStatus("created folder " + created.generic_string());
     }
 
     void SlateAppMode::BeginFolderPicker()
     {
         m_pendingFolderPath = ".";
         m_folderPickerActive = true;
+        m_folderPickerAction = FolderPickerAction::NewNote;
         m_screen = Screen::FileTree;
         std::fill(m_filterBuffer.begin(), m_filterBuffer.end(), '\0');
         m_filterActive = false;
@@ -328,20 +245,75 @@ namespace Software::Modes::Slate
         SetStatus("choose a folder for the new note");
     }
 
-    void SlateAppMode::BeginSearchOverlay(bool clearQuery)
+    void SlateAppMode::BeginFolderCreate()
     {
+        m_pendingFolderPath = SelectedTreeFolderPath();
+        BeginPrompt(PromptAction::NewFolderName, "new folder name", "New Folder");
+    }
+
+    void SlateAppMode::BeginMovePicker(const Software::Slate::fs::path& relativePath)
+    {
+        m_pendingPath = Software::Slate::PathUtils::NormalizeRelative(relativePath);
+        const auto parent = m_pendingPath.parent_path();
+        m_pendingFolderPath = parent.empty() ? Software::Slate::fs::path(".") : parent;
+        m_pendingRewritePlan = {};
+        m_folderPickerActive = true;
+        m_folderPickerAction = FolderPickerAction::MoveDestination;
+        m_screen = Screen::FileTree;
+        std::fill(m_filterBuffer.begin(), m_filterBuffer.end(), '\0');
+        m_filterActive = false;
+        m_navigation.Reset();
+        SetStatus("choose destination for " + m_pendingPath.generic_string());
+    }
+
+    void SlateAppMode::BeginSearchOverlay(bool clearQuery, SearchOverlayScope scope)
+    {
+        CommitEditorToDocument(m_nowSeconds);
         if (clearQuery)
         {
             std::fill(m_searchBuffer.begin(), m_searchBuffer.end(), '\0');
             m_searchNavigation.Reset();
         }
+        m_searchOverlayScope = scope;
+        if (scope == SearchOverlayScope::Workspace)
+        {
+            m_searchMode = Software::Slate::SearchMode::FileNames;
+        }
         m_searchOverlayOpen = true;
         m_focusFilter = true;
+    }
+
+    void SlateAppMode::BeginDocumentFindOverlay(bool clearQuery)
+    {
+        BeginSearchOverlay(clearQuery, SearchOverlayScope::Document);
     }
 
     void SlateAppMode::CloseSearchOverlay()
     {
         m_searchOverlayOpen = false;
+    }
+
+    void SlateAppMode::OpenSelectedSearchResult()
+    {
+        if (!m_searchNavigation.HasSelection() || m_visibleSearchResults.empty())
+        {
+            return;
+        }
+
+        const auto result = m_visibleSearchResults[m_searchNavigation.Selected()];
+        CloseSearchOverlay();
+        if (m_searchOverlayScope == SearchOverlayScope::Document)
+        {
+            JumpEditorToLine(result.line);
+            m_screen = Screen::Editor;
+            return;
+        }
+
+        OpenDocument(result.relativePath);
+        if (m_searchMode == Software::Slate::SearchMode::FullText && result.line > 0)
+        {
+            JumpEditorToLine(result.line);
+        }
     }
 
     void SlateAppMode::BeginPrompt(PromptAction action, const std::string& title, const std::string& initialValue)
@@ -415,9 +387,52 @@ namespace Software::Modes::Slate
             m_screen = Screen::Home;
             break;
         }
+        case PromptAction::NewFolderName:
+            CreateNewFolder(value);
+            break;
+        case PromptAction::MoveName:
+        {
+            const auto source = Software::Slate::PathUtils::NormalizeRelative(m_pendingPath);
+            const std::string finalName = value.empty() ? source.filename().string() : value;
+            if (finalName.empty())
+            {
+                SetError("target name required");
+                m_screen = Screen::FileTree;
+                break;
+            }
+
+            Software::Slate::fs::path folder = Software::Slate::PathUtils::NormalizeRelative(m_pendingFolderPath);
+            if (folder == ".")
+            {
+                folder.clear();
+            }
+
+            m_pendingTargetPath = FinalMoveTargetPath(source, folder / finalName);
+            m_pendingRewritePlan = m_links.BuildRenamePlan(m_workspace, source, m_pendingTargetPath);
+            m_folderPickerActive = false;
+            m_folderPickerAction = FolderPickerAction::None;
+            if (m_pendingRewritePlan.TotalReplacements() > 0)
+            {
+                BeginConfirm(ConfirmAction::ApplyRenameMove,
+                             "move updates " + std::to_string(m_pendingRewritePlan.TotalReplacements()) +
+                                 " links. y apply / esc cancel");
+            }
+            else
+            {
+                ApplyPendingRenameMove();
+                m_screen = Screen::FileTree;
+            }
+            break;
+        }
         case PromptAction::RenameMove:
         {
-            m_pendingTargetPath = Software::Slate::PathUtils::NormalizeRelative(value);
+            if (value.empty())
+            {
+                SetError("target path required");
+                m_screen = Screen::FileTree;
+                break;
+            }
+            m_pendingTargetPath = FinalMoveTargetPath(m_pendingPath, value);
             m_pendingRewritePlan = m_links.BuildRenamePlan(m_workspace, m_pendingPath, m_pendingTargetPath);
             if (m_pendingRewritePlan.TotalReplacements() > 0)
             {
@@ -427,17 +442,7 @@ namespace Software::Modes::Slate
             }
             else
             {
-                std::string error;
-                if (!m_workspace.RenameOrMove(m_pendingPath, m_pendingTargetPath, &error))
-                {
-                    SetError(error);
-                }
-                else
-                {
-                    SetStatus("moved " + m_pendingPath.generic_string() + " -> " +
-                              m_pendingTargetPath.generic_string());
-                    m_search.Rebuild(m_workspace);
-                }
+                ApplyPendingRenameMove();
                 m_screen = Screen::FileTree;
             }
             break;
@@ -480,10 +485,22 @@ namespace Software::Modes::Slate
         {
             BeginFolderPicker();
         }
+        else if (trimmed == "folder" || trimmed == "mkdir")
+        {
+            BeginFolderCreate();
+        }
         else if (trimmed == "workspaces" || trimmed == "vaults")
         {
             m_workspaceNavigation.SetCount(m_workspaceRegistry.Vaults().size());
             m_screen = Screen::WorkspaceSwitcher;
+        }
+        else if (trimmed == "library" || trimmed == "l" || trimmed == "docs")
+        {
+            std::fill(m_filterBuffer.begin(), m_filterBuffer.end(), '\0');
+            m_folderPickerActive = false;
+            m_folderPickerAction = FolderPickerAction::None;
+            m_navigation.Reset();
+            m_screen = Screen::Library;
         }
         else if (trimmed == "new workspace" || trimmed == "new vault")
         {
@@ -545,17 +562,19 @@ namespace Software::Modes::Slate
         switch (action)
         {
         case ConfirmAction::DeletePath:
+        {
+            const auto* active = m_documents.Active();
+            const bool activeWasDeleted =
+                active && PathEqualsOrDescendantOf(active->relativePath, m_pendingPath);
             if (m_workspace.DeletePath(m_pendingPath, &error))
             {
                 SetStatus("deleted " + m_pendingPath.generic_string());
                 m_search.Rebuild(m_workspace);
-                if (m_documents.Active() && m_documents.Active()->relativePath == m_pendingPath)
+                if (activeWasDeleted)
                 {
                     m_documents.Close();
                     m_editorTextFocused = false;
-                    m_focusEditor = false;
-                    m_editorScratchLine = InvalidLine;
-                    m_editorLineText.clear();
+                    m_editor.Load("", "\n");
                 }
             }
             else
@@ -564,6 +583,7 @@ namespace Software::Modes::Slate
             }
             m_screen = Screen::FileTree;
             break;
+        }
         case ConfirmAction::ApplyRenameMove:
             if (!m_links.ApplyRewritePlan(m_workspace, m_pendingRewritePlan, &error))
             {
@@ -571,16 +591,7 @@ namespace Software::Modes::Slate
                 m_screen = Screen::FileTree;
                 break;
             }
-            if (!m_workspace.RenameOrMove(m_pendingPath, m_pendingTargetPath, &error))
-            {
-                SetError(error);
-            }
-            else
-            {
-                SetStatus("moved " + m_pendingPath.generic_string() + " -> " +
-                          m_pendingTargetPath.generic_string());
-                m_search.Rebuild(m_workspace);
-            }
+            ApplyPendingRenameMove();
             m_screen = Screen::FileTree;
             break;
         case ConfirmAction::RestoreRecovery:
@@ -588,12 +599,8 @@ namespace Software::Modes::Slate
             {
                 if (auto* document = m_documents.Active())
                 {
-                    (void)document;
+                    m_editor.Load(document->text, document->lineEnding);
                     m_editorTextFocused = true;
-                    m_focusEditor = true;
-                    m_editorActiveLine = 0;
-                    m_editorScratchLine = InvalidLine;
-                    m_editorRequestedCursorPos = 0;
                 }
                 SetStatus("recovery restored");
             }
@@ -608,8 +615,14 @@ namespace Software::Modes::Slate
             m_screen = Screen::Editor;
             break;
         case ConfirmAction::Quit:
-            SaveActiveDocument();
-            context.quitRequested = true;
+            if (SaveActiveDocument())
+            {
+                context.quitRequested = true;
+            }
+            else
+            {
+                m_screen = m_returnScreen;
+            }
             break;
         case ConfirmAction::None:
             m_screen = m_returnScreen;
@@ -619,14 +632,14 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::BeginRenameMove(const Software::Slate::fs::path& relativePath)
     {
-        m_pendingPath = relativePath;
-        BeginPrompt(PromptAction::RenameMove, "move / rename path", relativePath.generic_string());
+        BeginMovePicker(relativePath);
     }
 
     void SlateAppMode::BeginDelete(const Software::Slate::fs::path& relativePath)
     {
         m_pendingPath = relativePath;
-        BeginConfirm(ConfirmAction::DeletePath, "delete " + relativePath.generic_string() + "? y delete / esc cancel");
+        BeginConfirm(ConfirmAction::DeletePath,
+                     "delete file/folder " + relativePath.generic_string() + "? y delete / esc cancel");
     }
 
     void SlateAppMode::PrepareList(Screen screen)
@@ -648,12 +661,6 @@ namespace Software::Modes::Slate
         {
             for (const auto& path : m_workspace.MarkdownFiles())
             {
-                const bool journal = Software::Slate::PathUtils::ToLower(path.generic_string()).rfind("journal/", 0) == 0;
-                const bool docsScreen = screen == Screen::DocsIndex;
-                if (docsScreen && journal)
-                {
-                    continue;
-                }
                 if (ContainsFilter(path.generic_string(), filter.c_str()))
                 {
                     m_visiblePaths.push_back(path);
@@ -680,6 +687,15 @@ namespace Software::Modes::Slate
 
             auto rows = Software::Slate::BuildTreeRows(m_workspace.Entries(), m_collapsedFolders, m_filterBuffer.data(),
                                                        Software::Slate::TreeViewMode::Folders);
+            if (m_folderPickerAction == FolderPickerAction::MoveDestination &&
+                Software::Slate::fs::is_directory(m_workspace.Resolve(m_pendingPath)))
+            {
+                rows.erase(std::remove_if(rows.begin(), rows.end(),
+                                          [&](const Software::Slate::TreeViewRow& row) {
+                                              return PathEqualsOrDescendantOf(row.relativePath, m_pendingPath);
+                                          }),
+                           rows.end());
+            }
             for (auto& row : rows)
             {
                 row.depth += 1;
@@ -689,8 +705,10 @@ namespace Software::Modes::Slate
         }
         else
         {
-            m_treeRows = Software::Slate::BuildTreeRows(m_workspace.Entries(), m_collapsedFolders, m_filterBuffer.data(),
-                                                        Software::Slate::TreeViewMode::Files);
+            const auto mode = m_screen == Screen::Library ? Software::Slate::TreeViewMode::Library
+                                                          : Software::Slate::TreeViewMode::Files;
+            m_treeRows =
+                Software::Slate::BuildTreeRows(m_workspace.Entries(), m_collapsedFolders, m_filterBuffer.data(), mode);
         }
 
         m_navigation.SetCount(m_treeRows.size());
@@ -718,7 +736,14 @@ namespace Software::Modes::Slate
             if (row.isDirectory)
             {
                 m_pendingFolderPath = row.relativePath;
-                BeginPrompt(PromptAction::NewNoteName, "new note name", "Untitled.md");
+                if (m_folderPickerAction == FolderPickerAction::MoveDestination)
+                {
+                    BeginPrompt(PromptAction::MoveName, "move as", m_pendingPath.filename().string());
+                }
+                else
+                {
+                    BeginPrompt(PromptAction::NewNoteName, "new note name", "Untitled.md");
+                }
             }
             return;
         }
@@ -757,19 +782,151 @@ namespace Software::Modes::Slate
         }
     }
 
-    void SlateAppMode::SaveActiveDocument()
+    Software::Slate::fs::path SlateAppMode::SelectedTreeFolderPath() const
     {
+        if (!m_navigation.HasSelection() || m_treeRows.empty())
+        {
+            return ".";
+        }
+
+        const auto& row = m_treeRows[m_navigation.Selected()];
+        if (row.isDirectory)
+        {
+            return row.relativePath;
+        }
+
+        const auto parent = row.relativePath.parent_path();
+        return parent.empty() ? Software::Slate::fs::path(".") : parent;
+    }
+
+    bool SlateAppMode::ApplyPendingRenameMove()
+    {
+        const auto source = Software::Slate::PathUtils::NormalizeRelative(m_pendingPath);
+        const auto target = FinalMoveTargetPath(source, m_pendingTargetPath);
+        m_pendingTargetPath = target;
+        const bool sourceIsDirectory = Software::Slate::fs::is_directory(m_workspace.Resolve(source));
+
+        if (source == target)
+        {
+            SetError("source and target are the same");
+            return false;
+        }
+
+        if (sourceIsDirectory && PathEqualsOrDescendantOf(target, source))
+        {
+            SetError("cannot move a folder into itself");
+            return false;
+        }
+
+        bool activeWasMoved = false;
+        Software::Slate::fs::path movedActivePath;
+        if (const auto* active = m_documents.Active())
+        {
+            activeWasMoved = PathEqualsOrDescendantOf(active->relativePath, source);
+            if (activeWasMoved)
+            {
+                movedActivePath = RebaseRelativePath(active->relativePath, source, target);
+                if (!SaveActiveDocument())
+                {
+                    return false;
+                }
+            }
+        }
+
+        std::string error;
+        if (!m_workspace.RenameOrMove(source, target, &error))
+        {
+            SetError(error);
+            return false;
+        }
+
+        SetStatus("moved " + source.generic_string() + " -> " + target.generic_string());
+        m_search.Rebuild(m_workspace);
+        const auto targetParent = target.parent_path();
+        m_collapsedFolders.erase(Software::Slate::TreePathKey(targetParent.empty() ? Software::Slate::fs::path(".") : targetParent));
+        if (sourceIsDirectory)
+        {
+            m_collapsedFolders.insert(Software::Slate::TreePathKey(target));
+        }
+
+        if (activeWasMoved)
+        {
+            m_documents.Close();
+            m_editorTextFocused = false;
+            m_editor.Load("", "\n");
+            if (Software::Slate::PathUtils::IsMarkdownFile(movedActivePath) &&
+                Software::Slate::fs::exists(m_workspace.Resolve(movedActivePath)))
+            {
+                OpenDocument(movedActivePath);
+            }
+        }
+
+        return true;
+    }
+
+    void SlateAppMode::CollapseAllWorkspaceFolders()
+    {
+        m_collapsedFolders.clear();
+        for (const auto& entry : m_workspace.Entries())
+        {
+            if (entry.isDirectory)
+            {
+                m_collapsedFolders.insert(Software::Slate::TreePathKey(entry.relativePath));
+            }
+        }
+    }
+
+    bool SlateAppMode::SaveActiveDocument()
+    {
+        CommitEditorToDocument(m_nowSeconds);
         std::string error;
         if (m_documents.Save(&error))
         {
             SetStatus("saved");
             m_workspace.Scan(nullptr);
             m_search.Rebuild(m_workspace);
+            return true;
         }
-        else
+        SetError(error);
+        return false;
+    }
+
+    bool SlateAppMode::CommitEditorToDocument(double elapsedSeconds)
+    {
+        auto* document = m_documents.Active();
+        if (!document)
         {
-            SetError(error);
+            return false;
         }
+
+        std::string text;
+        const bool changed = m_editor.CommitActiveLine(&text);
+        if (changed || document->text != text)
+        {
+            document->text = std::move(text);
+            m_documents.MarkEdited(elapsedSeconds);
+            return true;
+        }
+        return false;
+    }
+
+    void SlateAppMode::LoadEditorFromActiveDocument()
+    {
+        if (const auto* document = m_documents.Active())
+        {
+            m_editor.Load(document->text, document->lineEnding);
+            m_editorTextFocused = true;
+        }
+    }
+
+    void SlateAppMode::JumpEditorToLine(std::size_t line)
+    {
+        if (line == 0)
+        {
+            return;
+        }
+        m_editor.SetActiveLine(line - 1, 0);
+        m_editorTextFocused = true;
     }
 
     void SlateAppMode::ProcessDroppedFiles(Software::Core::Runtime::AppContext& context)
@@ -864,15 +1021,20 @@ namespace Software::Modes::Slate
             break;
         case Screen::QuickOpen:
         case Screen::Recent:
-        case Screen::DocsIndex:
             PrepareList(screen);
             if (handleInput)
             {
                 HandleListKeys();
             }
-            DrawPathList(screen == Screen::QuickOpen ? "quick open"
-                                                     : (screen == Screen::Recent ? "recent files" : "gdd / docs"),
-                         "no matching files");
+            DrawPathList(screen == Screen::QuickOpen ? "quick open" : "recent files", "no matching files");
+            break;
+        case Screen::Library:
+            PrepareTreeRows(false);
+            if (handleInput)
+            {
+                HandleLibraryKeys();
+            }
+            DrawFileTree(false);
             break;
         case Screen::FileTree:
             PrepareTreeRows(m_folderPickerActive);
@@ -901,7 +1063,7 @@ namespace Software::Modes::Slate
     void SlateAppMode::DrawHome(Software::Core::Runtime::AppContext& context)
     {
         (void)context;
-        ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.12f));
+        ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.10f));
         TextCentered("Slate", Cyan);
         ImGui::Spacing();
         if (const auto* vault = m_workspaceRegistry.ActiveVault())
@@ -914,28 +1076,34 @@ namespace Software::Modes::Slate
             TextCentered(m_workspace.Root().filename().string().c_str(), Muted);
         }
         ImGui::Spacing();
-        TextCentered("journal", Primary);
+        TextCentered("quiet markdown workspace", Primary);
 
-        ImGui::Dummy(ImVec2(1.0f, 28.0f));
-        const float columnWidth = 300.0f;
+        ImGui::Dummy(ImVec2(1.0f, 24.0f));
+        const float columnWidth = 360.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - columnWidth) * 0.5f);
         ImGui::BeginGroup();
+        auto section = [](const char* title) {
+            ImGui::Dummy(ImVec2(1.0f, 8.0f));
+            ImGui::TextColored(Muted, "%s", title);
+        };
+        section("write");
         TextLine("j", "today journal");
         TextLine("n", "new note");
-        TextLine("o", "quick open");
-        TextLine("s", "search");
-        TextLine("r", "recent files");
+        section("browse");
+        TextLine("l", "library");
         TextLine("f", "file tree");
-        TextLine("g", "gdd / docs");
+        TextLine("r", "recent files");
+        section("find");
+        TextLine("s", "search");
+        TextLine("o", "quick open");
+        section("system");
         TextLine("w", "workspaces");
-        TextLine(":", "command");
         TextLine("?", "shortcuts");
         TextLine("q", "quit");
         ImGui::EndGroup();
 
         ImGui::Dummy(ImVec2(1.0f, 24.0f));
-        const std::string stat = "markdown files: " + std::to_string(m_workspace.MarkdownFiles().size()) +
-                                 "   recent: " + std::to_string(m_workspace.RecentFiles().size());
+        const std::string stat = std::to_string(m_workspace.MarkdownFiles().size()) + " markdown files";
         TextCentered(stat.c_str(), Green);
     }
 
@@ -948,14 +1116,13 @@ namespace Software::Modes::Slate
             return;
         }
 
-        ImGui::TextColored(Cyan, "%s", document->relativePath.generic_string().c_str());
+        ImGui::TextColored(Muted, "%s", document->relativePath.generic_string().c_str());
         ImGui::SameLine();
         ImGui::TextColored(document->conflict ? Red : (document->dirty ? Amber : Green), "%s",
                            document->conflict ? "external change" : (document->dirty ? "dirty" : "saved"));
-        ImGui::Separator();
 
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        ImGui::BeginChild("LiveMarkdownEditorPage", ImVec2(0.0f, avail.y - 58.0f), false,
+        ImGui::BeginChild("LiveMarkdownEditorPage", ImVec2(0.0f, avail.y - 52.0f), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
         DrawLiveMarkdownEditor(*document, context);
         ImGui::EndChild();
@@ -964,17 +1131,8 @@ namespace Software::Modes::Slate
     void SlateAppMode::DrawLiveMarkdownEditor(Software::Slate::DocumentService::Document& document,
                                               Software::Core::Runtime::AppContext& context)
     {
-        auto lines = EditorLinesFromText(document.text);
-        if (m_editorActiveLine >= lines.size())
-        {
-            SetEditorActiveLine(lines.empty() ? 0 : lines.size() - 1, 0);
-        }
-
-        if (m_editorScratchLine != m_editorActiveLine)
-        {
-            m_editorLineText = lines[m_editorActiveLine];
-            m_editorScratchLine = m_editorActiveLine;
-        }
+        m_editor.EnsureLoaded(document.text, document.lineEnding);
+        const auto& lines = m_editor.Lines();
 
         bool inCodeFence = false;
         bool inFrontmatter = !lines.empty() && Software::Slate::PathUtils::Trim(lines.front()) == "---";
@@ -994,60 +1152,79 @@ namespace Software::Modes::Slate
 
             ImGui::PushID(static_cast<int>(i));
             ImGui::BeginGroup();
-            if (i == m_editorActiveLine)
+            if (i == m_editor.ActiveLine())
             {
-                if (m_focusEditor)
+                if (m_editor.FocusRequested())
                 {
                     ImGui::SetKeyboardFocusHere();
-                    m_focusEditor = false;
+                    m_editor.ClearFocusRequest();
                 }
 
                 ImGui::SetNextItemWidth(pageWidth);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.10f, 0.095f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, Primary);
-                const TextInputResult result = InputTextString("##LiveMarkdownLine", m_editorLineText,
+                int cursor = m_editor.CaretColumn();
+                const int cursorBeforeInput = cursor;
+                const int lineSizeBeforeInput = static_cast<int>(m_editor.ActiveLineText().size());
+                const TextInputResult result = InputTextString("##LiveMarkdownLine", m_editor.ActiveLineText(),
                                                                ImGuiInputTextFlags_EnterReturnsTrue,
-                                                               &m_editorCursorPos,
-                                                               m_editorRequestedCursorPos);
-                m_editorRequestedCursorPos = -1;
+                                                               &cursor,
+                                                               m_editor.RequestedCursorColumn());
+                m_editor.SetCaretColumn(cursor);
+                m_editor.ClearRequestedCursorColumn();
                 m_editorTextFocused = ImGui::IsItemActive();
                 ImGui::PopStyleColor(2);
 
                 if (result.edited)
                 {
-                    ReplaceEditorLine(document, lines, i, m_editorLineText, context.frame.elapsedSeconds);
+                    CommitEditorToDocument(context.frame.elapsedSeconds);
                 }
 
                 if (result.submitted)
                 {
-                    SplitEditorLine(document, lines, context.frame.elapsedSeconds);
+                    m_editor.SplitActiveLine();
+                    CommitEditorToDocument(context.frame.elapsedSeconds);
                     ImGui::EndGroup();
                     ImGui::PopID();
                     break;
                 }
 
-                if (m_editorTextFocused && IsKeyPressed(ImGuiKey_Backspace) && m_editorCursorPos <= 0 &&
-                    m_editorActiveLine > 0)
+                if (m_editorTextFocused && ImGui::IsKeyPressed(ImGuiKey_Backspace, true) &&
+                    cursorBeforeInput <= 0 && m_editor.ActiveLine() > 0)
                 {
-                    MergeEditorLineWithPrevious(document, lines, context.frame.elapsedSeconds);
+                    if (m_editor.MergeActiveLineWithPrevious())
+                    {
+                        CommitEditorToDocument(context.frame.elapsedSeconds);
+                    }
                     ImGui::EndGroup();
                     ImGui::PopID();
                     break;
                 }
 
-                if (m_editorTextFocused && IsKeyPressed(ImGuiKey_UpArrow) && m_editorActiveLine > 0)
+                if (m_editorTextFocused && ImGui::IsKeyPressed(ImGuiKey_Delete, true) &&
+                    cursorBeforeInput >= lineSizeBeforeInput)
                 {
-                    ReplaceEditorLine(document, lines, i, m_editorLineText, context.frame.elapsedSeconds);
-                    SetEditorActiveLine(m_editorActiveLine - 1, m_editorCursorPos);
+                    if (m_editor.MergeActiveLineWithNext())
+                    {
+                        CommitEditorToDocument(context.frame.elapsedSeconds);
+                    }
                     ImGui::EndGroup();
                     ImGui::PopID();
                     break;
                 }
 
-                if (m_editorTextFocused && IsKeyPressed(ImGuiKey_DownArrow) && m_editorActiveLine + 1 < lines.size())
+                if (m_editorTextFocused && ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) && m_editor.ActiveLine() > 0)
                 {
-                    ReplaceEditorLine(document, lines, i, m_editorLineText, context.frame.elapsedSeconds);
-                    SetEditorActiveLine(m_editorActiveLine + 1, m_editorCursorPos);
+                    m_editor.MoveActiveLine(-1);
+                    ImGui::EndGroup();
+                    ImGui::PopID();
+                    break;
+                }
+
+                if (m_editorTextFocused && ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) &&
+                    m_editor.ActiveLine() + 1 < lines.size())
+                {
+                    m_editor.MoveActiveLine(1);
                     ImGui::EndGroup();
                     ImGui::PopID();
                     break;
@@ -1061,7 +1238,8 @@ namespace Software::Modes::Slate
             ImGui::EndGroup();
             if (ImGui::IsItemClicked())
             {
-                SetEditorActiveLine(i, static_cast<int>(lines[i].size()));
+                m_editor.SetActiveLine(i, static_cast<int>(lines[i].size()));
+                m_editorTextFocused = true;
             }
             ImGui::PopID();
 
@@ -1076,68 +1254,6 @@ namespace Software::Modes::Slate
         }
     }
 
-    void SlateAppMode::SetEditorActiveLine(std::size_t line, int requestedCursor)
-    {
-        m_editorActiveLine = line;
-        m_editorScratchLine = InvalidLine;
-        m_editorRequestedCursorPos = requestedCursor;
-        m_focusEditor = true;
-        m_editorTextFocused = true;
-    }
-
-    void SlateAppMode::ReplaceEditorLine(Software::Slate::DocumentService::Document& document,
-                                         std::vector<std::string>& lines,
-                                         std::size_t line,
-                                         const std::string& text,
-                                         double elapsedSeconds)
-    {
-        if (line >= lines.size() || lines[line] == text)
-        {
-            return;
-        }
-
-        lines[line] = text;
-        document.text = JoinEditorLines(lines, document.lineEnding);
-        m_documents.MarkEdited(elapsedSeconds);
-    }
-
-    void SlateAppMode::SplitEditorLine(Software::Slate::DocumentService::Document& document,
-                                       std::vector<std::string>& lines,
-                                       double elapsedSeconds)
-    {
-        if (m_editorActiveLine >= lines.size())
-        {
-            return;
-        }
-
-        const int cursor = std::clamp(m_editorCursorPos, 0, static_cast<int>(m_editorLineText.size()));
-        const std::string left = m_editorLineText.substr(0, static_cast<std::size_t>(cursor));
-        const std::string right = m_editorLineText.substr(static_cast<std::size_t>(cursor));
-        lines[m_editorActiveLine] = left;
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(m_editorActiveLine + 1), right);
-        document.text = JoinEditorLines(lines, document.lineEnding);
-        m_documents.MarkEdited(elapsedSeconds);
-        SetEditorActiveLine(m_editorActiveLine + 1, 0);
-    }
-
-    void SlateAppMode::MergeEditorLineWithPrevious(Software::Slate::DocumentService::Document& document,
-                                                   std::vector<std::string>& lines,
-                                                   double elapsedSeconds)
-    {
-        if (m_editorActiveLine == 0 || m_editorActiveLine >= lines.size())
-        {
-            return;
-        }
-
-        const std::size_t previous = m_editorActiveLine - 1;
-        const int cursor = static_cast<int>(lines[previous].size());
-        lines[previous] += m_editorLineText;
-        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(m_editorActiveLine));
-        document.text = JoinEditorLines(lines, document.lineEnding);
-        m_documents.MarkEdited(elapsedSeconds);
-        SetEditorActiveLine(previous, cursor);
-    }
-
     void SlateAppMode::InsertTextAtEditorCursor(const std::string& text, double elapsedSeconds)
     {
         auto* document = m_documents.Active();
@@ -1146,41 +1262,64 @@ namespace Software::Modes::Slate
             return;
         }
 
-        auto lines = EditorLinesFromText(document->text);
-        if (m_editorActiveLine >= lines.size())
+        m_editor.EnsureLoaded(document->text, document->lineEnding);
+        if (m_editor.InsertTextAtCursor(text))
         {
-            m_editorActiveLine = lines.size() - 1;
+            CommitEditorToDocument(elapsedSeconds);
+        }
+    }
+
+    void SlateAppMode::DrawInlineSpans(const std::vector<Software::Slate::MarkdownInlineSpan>& spans,
+                                       const ImVec4& baseColor)
+    {
+        bool first = true;
+        for (const auto& span : spans)
+        {
+            if (span.text.empty())
+            {
+                continue;
+            }
+            if (!first)
+            {
+                ImGui::SameLine(0.0f, 0.0f);
+            }
+
+            ImVec4 color = baseColor;
+            if (span.code)
+            {
+                color = Code;
+            }
+            else if (span.image)
+            {
+                color = Amber;
+            }
+            else if (span.link)
+            {
+                color = Cyan;
+            }
+            else if (span.bold)
+            {
+                color = Primary;
+            }
+            else if (span.italic)
+            {
+                color = Muted;
+            }
+
+            ImGui::TextColored(color, "%s", span.text.c_str());
+            if (span.bold)
+            {
+                const ImVec2 min = ImGui::GetItemRectMin();
+                ImGui::GetWindowDrawList()->AddText(ImVec2(min.x + 0.7f, min.y), ImGui::ColorConvertFloat4ToU32(color),
+                                                    span.text.c_str());
+            }
+            first = false;
         }
 
-        if (m_editorScratchLine == m_editorActiveLine)
+        if (first)
         {
-            lines[m_editorActiveLine] = m_editorLineText;
+            ImGui::TextUnformatted("");
         }
-        else
-        {
-            m_editorLineText = lines[m_editorActiveLine];
-            m_editorScratchLine = m_editorActiveLine;
-        }
-
-        const int cursor = std::clamp(m_editorCursorPos, 0, static_cast<int>(m_editorLineText.size()));
-        const std::string before = m_editorLineText.substr(0, static_cast<std::size_t>(cursor));
-        const std::string after = m_editorLineText.substr(static_cast<std::size_t>(cursor));
-        const auto replacement = EditorLinesFromText(before + text + after);
-
-        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(m_editorActiveLine));
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(m_editorActiveLine),
-                     replacement.begin(),
-                     replacement.end());
-
-        document->text = JoinEditorLines(lines, document->lineEnding);
-        m_documents.MarkEdited(elapsedSeconds);
-
-        const auto inserted = EditorLinesFromText(text);
-        const std::size_t newLine = m_editorActiveLine + (inserted.empty() ? 0 : inserted.size() - 1);
-        const int newCursor = inserted.size() <= 1
-                                  ? static_cast<int>(before.size() + text.size())
-                                  : static_cast<int>(inserted.back().size());
-        SetEditorActiveLine(std::min(newLine, lines.size() - 1), newCursor);
     }
 
     void SlateAppMode::DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter)
@@ -1219,38 +1358,43 @@ namespace Software::Modes::Slate
                 ++hashes;
             }
             const std::string title =
-                InlineMarkdownText(Software::Slate::PathUtils::Trim(std::string_view(trimmed).substr(hashes)));
+                Software::Slate::PathUtils::Trim(std::string_view(trimmed).substr(hashes));
             const float scale = hashes == 1 ? 1.42f : (hashes == 2 ? 1.25f : 1.10f);
-            DrawScaledText(Cyan, scale, title.empty() ? "heading" : title.c_str());
+            ImGui::SetWindowFontScale(scale);
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(title.empty() ? "heading" : title),
+                            Cyan);
+            ImGui::SetWindowFontScale(1.0f);
         }
         else if (trimmed.rfind("- [ ]", 0) == 0 || trimmed.rfind("* [ ]", 0) == 0)
         {
             ImGui::TextColored(Amber, "[ ]");
             ImGui::SameLine();
-            const std::string text = InlineMarkdownText(Software::Slate::PathUtils::Trim(trimmed.substr(5)));
-            ImGui::TextWrapped("%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
+                                Software::Slate::PathUtils::Trim(trimmed.substr(5))),
+                            Primary);
         }
         else if (trimmed.rfind("- [x]", 0) == 0 || trimmed.rfind("- [X]", 0) == 0 || trimmed.rfind("* [x]", 0) == 0 ||
                  trimmed.rfind("* [X]", 0) == 0)
         {
             ImGui::TextColored(Green, "[x]");
             ImGui::SameLine();
-            const std::string text = InlineMarkdownText(Software::Slate::PathUtils::Trim(trimmed.substr(5)));
-            ImGui::TextWrapped("%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
+                                Software::Slate::PathUtils::Trim(trimmed.substr(5))),
+                            Primary);
         }
         else if (trimmed[0] == '>')
         {
             ImGui::TextColored(Amber, "|");
             ImGui::SameLine();
-            const std::string text = InlineMarkdownText(Software::Slate::PathUtils::Trim(trimmed.substr(1)));
-            ImGui::TextColored(Muted, "%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(
+                                Software::Slate::PathUtils::Trim(trimmed.substr(1))),
+                            Muted);
         }
         else if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0 || trimmed.rfind("+ ", 0) == 0)
         {
             ImGui::TextColored(Amber, "*");
             ImGui::SameLine();
-            const std::string text = InlineMarkdownText(trimmed.substr(2));
-            ImGui::TextWrapped("%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed.substr(2)), Primary);
         }
         else if (!trimmed.empty() && std::isdigit(static_cast<unsigned char>(trimmed[0])))
         {
@@ -1259,24 +1403,20 @@ namespace Software::Modes::Slate
             {
                 ImGui::TextColored(Amber, "%s", trimmed.substr(0, dot + 1).c_str());
                 ImGui::SameLine();
-                const std::string text = InlineMarkdownText(trimmed.substr(dot + 2));
-                ImGui::TextWrapped("%s", text.c_str());
+                DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed.substr(dot + 2)), Primary);
             }
             else
             {
-                const std::string text = InlineMarkdownText(line);
-                ImGui::TextWrapped("%s", text.c_str());
+                DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(line), Primary);
             }
         }
         else if (trimmed.find("![](") != std::string::npos || trimmed.find("![") != std::string::npos)
         {
-            const std::string text = InlineMarkdownText(trimmed);
-            ImGui::TextColored(Amber, "%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed), Amber);
         }
         else if (trimmed.find("](") != std::string::npos || trimmed.find("[[") != std::string::npos)
         {
-            const std::string text = InlineMarkdownText(trimmed);
-            ImGui::TextColored(Cyan, "%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(trimmed), Primary);
         }
         else if (trimmed.find('|') != std::string::npos)
         {
@@ -1284,8 +1424,7 @@ namespace Software::Modes::Slate
         }
         else
         {
-            const std::string text = InlineMarkdownText(line);
-            ImGui::TextWrapped("%s", text.c_str());
+            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(line), Primary);
         }
 
         if (indentWidth > 0.0f)
@@ -1315,11 +1454,18 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::DrawFileTree(bool folderPicker)
     {
-        ImGui::TextColored(Cyan, "%s", folderPicker ? "choose folder" : "file tree");
+        const bool movePicker = folderPicker && m_folderPickerAction == FolderPickerAction::MoveDestination;
+        const char* title =
+            m_screen == Screen::Library ? "library" : (movePicker ? "move to folder" : (folderPicker ? "choose folder" : "file tree"));
+        ImGui::TextColored(Cyan, "%s", title);
         if (m_filterBuffer[0] != '\0')
         {
             ImGui::SameLine();
             ImGui::TextColored(Amber, " filter: %s", m_filterBuffer.data());
+        }
+        if (movePicker)
+        {
+            ImGui::TextColored(Muted, "moving: %s", m_pendingPath.generic_string().c_str());
         }
         ImGui::Separator();
 
@@ -1375,7 +1521,18 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::DrawSearchOverlay()
     {
-        m_visibleSearchResults = m_search.Query(m_searchBuffer.data(), 100);
+        if (m_searchOverlayScope == SearchOverlayScope::Document)
+        {
+            const auto* document = m_documents.Active();
+            m_visibleSearchResults = document ? Software::Slate::SearchService::QueryDocument(document->text,
+                                                                                              m_searchBuffer.data(),
+                                                                                              100)
+                                              : std::vector<Software::Slate::SearchResult>{};
+        }
+        else
+        {
+            m_visibleSearchResults = m_search.Query(m_searchBuffer.data(), m_searchMode, 100);
+        }
         m_searchNavigation.SetCount(m_visibleSearchResults.size());
         HandleSearchOverlayKeys();
         if (!m_searchOverlayOpen)
@@ -1388,7 +1545,15 @@ namespace Software::Modes::Slate
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
         ImGui::BeginChild("SearchOverlay", size, true);
-        ImGui::TextColored(Cyan, "search");
+        const bool documentFind = m_searchOverlayScope == SearchOverlayScope::Document;
+        ImGui::TextColored(Cyan, "%s", documentFind ? "find in file" : "search");
+        if (!documentFind)
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(Muted, "%s", m_searchMode == Software::Slate::SearchMode::FileNames
+                                             ? "files"
+                                             : "full text");
+        }
         ImGui::SetNextItemWidth(-1.0f);
         if (m_focusFilter)
         {
@@ -1400,7 +1565,8 @@ namespace Software::Modes::Slate
 
         if (m_searchBuffer[0] == '\0')
         {
-            ImGui::TextColored(Muted, "type to search across markdown files");
+            ImGui::TextColored(Muted, "%s", documentFind ? "type to find in this file"
+                                                         : "type to search filenames. Tab toggles full text");
         }
         else if (m_visibleSearchResults.empty())
         {
@@ -1412,8 +1578,20 @@ namespace Software::Modes::Slate
             {
                 const auto& result = m_visibleSearchResults[i];
                 const bool selected = i == m_searchNavigation.Selected();
-                ImGui::TextColored(selected ? Green : Primary, "%s %s:%zu", selected ? ">" : " ",
-                                   result.relativePath.generic_string().c_str(), result.line);
+                if (documentFind)
+                {
+                    ImGui::TextColored(selected ? Green : Primary, "%s line %zu:%zu", selected ? ">" : " ",
+                                       result.line, result.column);
+                }
+                else
+                {
+                    std::string label = result.relativePath.generic_string();
+                    if (m_searchMode == Software::Slate::SearchMode::FullText)
+                    {
+                        label += ":" + std::to_string(result.line);
+                    }
+                    ImGui::TextColored(selected ? Green : Primary, "%s %s", selected ? ">" : " ", label.c_str());
+                }
                 ImGui::SameLine();
                 ImGui::TextColored(Muted, "%s", result.snippet.c_str());
             }
@@ -1488,17 +1666,19 @@ namespace Software::Modes::Slate
         TextLine(":", "command prompt");
         TextLine("^s", "save active document");
         TextLine("n", "new note folder picker");
+        TextLine("l", "library");
+        TextLine("a", "create folder in file tree");
         TextLine("w", "switch workspaces");
-        TextLine("m", "move/rename selected file");
-        TextLine("d", "delete selected file with confirmation");
+        TextLine("m", "move/rename selected file or folder with folder picker");
+        TextLine("d / del", "delete selected file or folder with confirmation");
         TextLine("?", "toggle this help");
         TextLine("q", "quit from home");
     }
 
     void SlateAppMode::DrawStatusLine()
     {
-        if (m_filterActive && m_screen == Screen::FileTree && !m_searchOverlayOpen && m_screen != Screen::Prompt &&
-            m_screen != Screen::Confirm)
+        if (m_filterActive && (m_screen == Screen::FileTree || m_screen == Screen::Library) && !m_searchOverlayOpen &&
+            m_screen != Screen::Prompt && m_screen != Screen::Confirm)
         {
             ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 82.0f);
             ImGui::TextColored(Amber, "filter");
@@ -1517,14 +1697,26 @@ namespace Software::Modes::Slate
         ImGui::Separator();
         ImGui::TextColored(Muted, "%s", HelperText().c_str());
         ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 26.0f);
-        ImGui::TextColored(m_statusIsError ? Red : Muted, "%s", m_status.c_str());
+        ImVec4 statusColor = m_statusIsError ? Red : Muted;
+        if (!m_statusIsError)
+        {
+            const float age = static_cast<float>(std::max(0.0, m_nowSeconds - m_statusSeconds));
+            statusColor.w = std::clamp(1.0f - age / 4.0f, 0.22f, 1.0f);
+        }
+        ImGui::TextColored(statusColor, "%s", m_status.c_str());
     }
 
     std::string SlateAppMode::HelperText() const
     {
         if (m_searchOverlayOpen)
         {
-            return "type search   Up/Down select   Enter open   Esc close";
+            if (m_searchOverlayScope == SearchOverlayScope::Document)
+            {
+                return "find in file   Up/Down select   Enter jump   Shift+Enter previous   Esc close";
+            }
+            return m_searchMode == Software::Slate::SearchMode::FileNames
+                       ? "filename search   Tab full text   Up/Down select   Enter open   Esc close"
+                       : "full text search   Tab filenames   Up/Down select   Enter open   Esc close";
         }
         if (m_screen == Screen::Prompt)
         {
@@ -1542,16 +1734,21 @@ namespace Software::Modes::Slate
         case Screen::WorkspaceSwitcher:
             return "Up/Down choose   Enter switch   n new workspace   d remove from list   Esc home";
         case Screen::Home:
-            return "(j) journal   (n) new   (o) open   (s) search   (f) files   (w) workspaces   (?) help   (q) quit";
+            return "(j) journal   (n) new   (l) library   (s) search   (?) help";
         case Screen::Editor:
-            return "Live Preview   active line reveals Markdown   Enter newline   Up/Down line   Ctrl+S save   Ctrl+V image";
+            return "Live Preview   Ctrl+F find   Ctrl+S save   Esc leave editor";
+        case Screen::Library:
+            return "Up/Down move   Right expand   Left collapse   Enter open/toggle   / filter   Esc home";
         case Screen::FileTree:
+            if (m_folderPickerActive && m_folderPickerAction == FolderPickerAction::MoveDestination)
+            {
+                return "Up/Down choose destination   Right expand   Left collapse   Enter choose   a folder   / filter   Esc cancel";
+            }
             return m_folderPickerActive
-                       ? "Up/Down choose   Right expand   Left collapse   Enter select folder   / filter   Esc cancel"
-                       : "Up/Down move   Right expand   Left collapse   Enter open/toggle   / filter   n new   m move   d delete   Esc home";
+                       ? "Up/Down choose   Right expand   Left collapse   Enter select folder   a folder   / filter   Esc cancel"
+                       : "Up/Down move   Right expand   Left collapse   Enter open/toggle   n note   a folder   m move   d/Delete delete   / filter   Esc home";
         case Screen::QuickOpen:
         case Screen::Recent:
-        case Screen::DocsIndex:
             return "Up/Down move   Enter open   / search   n new   Esc home";
         case Screen::Outline:
             return "Up/Down move   Enter show line   Esc editor";

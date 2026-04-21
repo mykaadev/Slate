@@ -12,6 +12,48 @@
 
 namespace Software::Slate
 {
+    namespace
+    {
+        bool PathEqualsOrDescendantOf(const fs::path& candidate, const fs::path& root)
+        {
+            const fs::path normalizedCandidate = PathUtils::NormalizeRelative(candidate);
+            const fs::path normalizedRoot = PathUtils::NormalizeRelative(root);
+            if (normalizedCandidate == normalizedRoot)
+            {
+                return true;
+            }
+
+            auto rootIt = normalizedRoot.begin();
+            auto candidateIt = normalizedCandidate.begin();
+            for (; rootIt != normalizedRoot.end(); ++rootIt, ++candidateIt)
+            {
+                if (candidateIt == normalizedCandidate.end() || *rootIt != *candidateIt)
+                {
+                    return false;
+                }
+            }
+            return candidateIt != normalizedCandidate.end();
+        }
+
+        fs::path RebaseRelativePath(const fs::path& candidate, const fs::path& oldRoot, const fs::path& newRoot)
+        {
+            const fs::path normalizedCandidate = PathUtils::NormalizeRelative(candidate);
+            const fs::path normalizedOldRoot = PathUtils::NormalizeRelative(oldRoot);
+            fs::path tail;
+
+            auto candidateIt = normalizedCandidate.begin();
+            auto oldIt = normalizedOldRoot.begin();
+            for (; oldIt != normalizedOldRoot.end() && candidateIt != normalizedCandidate.end(); ++oldIt, ++candidateIt)
+            {
+            }
+            for (; candidateIt != normalizedCandidate.end(); ++candidateIt)
+            {
+                tail /= *candidateIt;
+            }
+            return PathUtils::NormalizeRelative(PathUtils::NormalizeRelative(newRoot) / tail);
+        }
+    }
+
     WorkspaceService::WorkspaceService(fs::path root)
     {
         if (root.empty())
@@ -200,16 +242,56 @@ namespace Software::Slate
         return true;
     }
 
+    bool WorkspaceService::CreateFolder(const fs::path& folderRelativePath, const std::string& requestedName,
+                                        fs::path* createdPath, std::string* error)
+    {
+        const fs::path target = MakeCollisionSafeFolderPath(folderRelativePath, requestedName);
+        const fs::path absolute = Resolve(target);
+        if (!EnsureInsideWorkspace(absolute, error))
+        {
+            return false;
+        }
+
+        std::error_code ec;
+        if (fs::exists(absolute, ec))
+        {
+            if (error)
+            {
+                *error = "Folder already exists.";
+            }
+            return false;
+        }
+
+        fs::create_directories(absolute, ec);
+        if (ec)
+        {
+            if (error)
+            {
+                *error = ec.message();
+            }
+            return false;
+        }
+
+        if (createdPath)
+        {
+            *createdPath = target;
+        }
+        Scan(nullptr);
+        return true;
+    }
+
     bool WorkspaceService::RenameOrMove(const fs::path& oldRelativePath, const fs::path& newRelativePath,
                                         std::string* error)
     {
-        const fs::path oldAbsolute = Resolve(PathUtils::NormalizeRelative(oldRelativePath));
+        const fs::path normalizedOld = PathUtils::NormalizeRelative(oldRelativePath);
+        const fs::path oldAbsolute = Resolve(normalizedOld);
         fs::path newRelative = newRelativePath;
         if (PathUtils::IsMarkdownFile(oldAbsolute) && !PathUtils::IsMarkdownFile(newRelative))
         {
             newRelative += ".md";
         }
-        const fs::path newAbsolute = Resolve(PathUtils::NormalizeRelative(newRelative));
+        const fs::path normalizedNew = PathUtils::NormalizeRelative(newRelative);
+        const fs::path newAbsolute = Resolve(normalizedNew);
 
         if (!EnsureInsideWorkspace(oldAbsolute, error) || !EnsureInsideWorkspace(newAbsolute, error))
         {
@@ -256,9 +338,9 @@ namespace Software::Slate
 
         for (auto& recent : m_recentFiles)
         {
-            if (recent == oldRelativePath)
+            if (PathEqualsOrDescendantOf(recent, normalizedOld))
             {
-                recent = PathUtils::NormalizeRelative(newRelative);
+                recent = RebaseRelativePath(recent, normalizedOld, normalizedNew);
             }
         }
         SaveRecent();
@@ -268,7 +350,8 @@ namespace Software::Slate
 
     bool WorkspaceService::DeletePath(const fs::path& relativePath, std::string* error)
     {
-        const fs::path absolute = Resolve(PathUtils::NormalizeRelative(relativePath));
+        const fs::path normalized = PathUtils::NormalizeRelative(relativePath);
+        const fs::path absolute = Resolve(normalized);
         if (!EnsureInsideWorkspace(absolute, error))
         {
             return false;
@@ -294,7 +377,11 @@ namespace Software::Slate
             return false;
         }
 
-        m_recentFiles.erase(std::remove(m_recentFiles.begin(), m_recentFiles.end(), relativePath), m_recentFiles.end());
+        m_recentFiles.erase(std::remove_if(m_recentFiles.begin(), m_recentFiles.end(),
+                                           [&](const fs::path& recent) {
+                                               return PathEqualsOrDescendantOf(recent, normalized);
+                                           }),
+                            m_recentFiles.end());
         SaveRecent();
         Scan(nullptr);
         return true;
@@ -337,6 +424,36 @@ namespace Software::Slate
         for (int suffix = 2; fs::exists(Resolve(candidate)) && suffix < 10000; ++suffix)
         {
             candidate = PathUtils::NormalizeRelative(folder / (stem + "-" + std::to_string(suffix) + extension));
+        }
+        return candidate;
+    }
+
+    fs::path WorkspaceService::MakeCollisionSafeFolderPath(const fs::path& folderRelativePath,
+                                                           const std::string& requestedName) const
+    {
+        fs::path folder = PathUtils::NormalizeRelative(folderRelativePath);
+        if (folder == ".")
+        {
+            folder.clear();
+        }
+
+        std::string trimmed = PathUtils::Trim(requestedName);
+        if (trimmed.empty())
+        {
+            trimmed = "New Folder";
+        }
+
+        fs::path namePath(trimmed);
+        std::string name = PathUtils::SanitizeFileName(namePath.filename().string());
+        if (name.empty())
+        {
+            name = "New-Folder";
+        }
+
+        fs::path candidate = PathUtils::NormalizeRelative(folder / name);
+        for (int suffix = 2; fs::exists(Resolve(candidate)) && suffix < 10000; ++suffix)
+        {
+            candidate = PathUtils::NormalizeRelative(folder / (name + "-" + std::to_string(suffix)));
         }
         return candidate;
     }

@@ -10,6 +10,17 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::OpenWorkspace(const Software::Slate::fs::path& root)
     {
+        if (m_documents.HasOpenDocument())
+        {
+            if (!SaveActiveDocument())
+            {
+                return;
+            }
+            m_documents.Close();
+            m_editor.Load("", "\n");
+            m_editorTextFocused = false;
+        }
+
         std::string error;
         if (!m_workspace.Open(root, &error))
         {
@@ -18,6 +29,7 @@ namespace Software::Modes::Slate
         }
         m_documents.SetWorkspaceRoot(m_workspace.Root());
         m_assets.SetWorkspaceRoot(m_workspace.Root());
+        CollapseAllWorkspaceFolders();
         m_search.Rebuild(m_workspace);
         m_lastIndexSeconds = 0.0;
         m_workspaceLoaded = true;
@@ -111,11 +123,11 @@ namespace Software::Modes::Slate
         const auto& vaults = m_workspaceRegistry.Vaults();
         m_workspaceNavigation.SetCount(vaults.size());
 
-        if (IsKeyPressed(ImGuiKey_DownArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
         {
             m_workspaceNavigation.MoveNext();
         }
-        if (IsKeyPressed(ImGuiKey_UpArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
         {
             m_workspaceNavigation.MovePrevious();
         }

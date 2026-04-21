@@ -11,7 +11,8 @@ namespace Software::Slate
     enum class TreeViewMode
     {
         Files,
-        Folders
+        Folders,
+        Library
     };
 
     struct TreeViewRow

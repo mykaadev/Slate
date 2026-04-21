@@ -12,7 +12,12 @@ namespace Software::Slate
     {
     public:
         void Rebuild(const WorkspaceService& workspace);
-        std::vector<SearchResult> Query(const std::string& query, std::size_t limit = 100) const;
+        std::vector<SearchResult> Query(const std::string& query,
+                                        SearchMode mode = SearchMode::FileNames,
+                                        std::size_t limit = 100) const;
+        static std::vector<SearchResult> QueryDocument(const std::string& text,
+                                                       const std::string& query,
+                                                       std::size_t limit = 100);
 
     private:
         struct IndexedFile
@@ -21,6 +26,7 @@ namespace Software::Slate
             std::string title;
             std::vector<std::string> lines;
             std::string lowerPath;
+            std::string lowerTitle;
             std::string lowerBody;
         };
 

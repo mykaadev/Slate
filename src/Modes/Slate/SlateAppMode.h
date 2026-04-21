@@ -2,6 +2,7 @@
 
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
+#include "App/Slate/EditorDocumentViewModel.h"
 #include "App/Slate/LinkService.h"
 #include "App/Slate/MarkdownService.h"
 #include "App/Slate/NavigationController.h"
@@ -38,7 +39,7 @@ namespace Software::Modes::Slate
             FileTree,
             Recent,
             Outline,
-            DocsIndex,
+            Library,
             Prompt,
             Confirm,
             Help
@@ -54,6 +55,8 @@ namespace Software::Modes::Slate
             WorkspaceTitle,
             WorkspaceEmoji,
             WorkspacePath,
+            NewFolderName,
+            MoveName,
             RenameMove,
             Command
         };
@@ -68,15 +71,33 @@ namespace Software::Modes::Slate
             Quit
         };
 
+        enum class SearchOverlayScope
+        {
+            Workspace,
+            Document
+        };
+
+        enum class FolderPickerAction
+        {
+            None,
+            NewNote,
+            MoveDestination
+        };
+
         void OpenWorkspace(const Software::Slate::fs::path& root);
         void OpenVault(const Software::Slate::WorkspaceVault& vault);
         void BeginWorkspaceCreate();
         void OpenDocument(const Software::Slate::fs::path& relativePath);
         void OpenTodayJournal();
         void CreateNewNote(const std::string& value);
+        void CreateNewFolder(const std::string& value);
         void BeginFolderPicker();
-        void BeginSearchOverlay(bool clearQuery);
+        void BeginFolderCreate();
+        void BeginMovePicker(const Software::Slate::fs::path& relativePath);
+        void BeginSearchOverlay(bool clearQuery, SearchOverlayScope scope = SearchOverlayScope::Workspace);
+        void BeginDocumentFindOverlay(bool clearQuery);
         void CloseSearchOverlay();
+        void OpenSelectedSearchResult();
         void BeginPrompt(PromptAction action, const std::string& title, const std::string& initialValue = {});
         void ExecutePrompt();
         void ExecuteCommand(const std::string& command);
@@ -89,7 +110,13 @@ namespace Software::Modes::Slate
         void OpenSelectedPath();
         void ActivateSelectedTreeRow();
         void ToggleSelectedFolder(bool expanded);
-        void SaveActiveDocument();
+        Software::Slate::fs::path SelectedTreeFolderPath() const;
+        bool ApplyPendingRenameMove();
+        void CollapseAllWorkspaceFolders();
+        bool SaveActiveDocument();
+        bool CommitEditorToDocument(double elapsedSeconds);
+        void LoadEditorFromActiveDocument();
+        void JumpEditorToLine(std::size_t line);
         void ProcessDroppedFiles(Software::Core::Runtime::AppContext& context);
 
         void DrawRootBegin();
@@ -100,19 +127,8 @@ namespace Software::Modes::Slate
         void DrawEditor(Software::Core::Runtime::AppContext& context);
         void DrawLiveMarkdownEditor(Software::Slate::DocumentService::Document& document,
                                     Software::Core::Runtime::AppContext& context);
+        void DrawInlineSpans(const std::vector<Software::Slate::MarkdownInlineSpan>& spans, const ImVec4& baseColor);
         void DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter = false);
-        void SetEditorActiveLine(std::size_t line, int requestedCursor = -1);
-        void ReplaceEditorLine(Software::Slate::DocumentService::Document& document,
-                               std::vector<std::string>& lines,
-                               std::size_t line,
-                               const std::string& text,
-                               double elapsedSeconds);
-        void SplitEditorLine(Software::Slate::DocumentService::Document& document,
-                             std::vector<std::string>& lines,
-                             double elapsedSeconds);
-        void MergeEditorLineWithPrevious(Software::Slate::DocumentService::Document& document,
-                                         std::vector<std::string>& lines,
-                                         double elapsedSeconds);
         void InsertTextAtEditorCursor(const std::string& text, double elapsedSeconds);
         void DrawPathList(const char* title, const char* emptyText);
         void DrawFileTree(bool folderPicker);
@@ -128,6 +144,7 @@ namespace Software::Modes::Slate
         void HandleListKeys();
         void HandleWorkspaceKeys();
         void HandleTreeKeys(bool folderPicker);
+        void HandleLibraryKeys();
         void HandleSearchOverlayKeys();
         void HandleHomeKeys(Software::Core::Runtime::AppContext& context);
         void HandleEditorKeys(Software::Core::Runtime::AppContext& context);
@@ -147,6 +164,7 @@ namespace Software::Modes::Slate
         Software::Slate::NavigationController m_navigation;
         Software::Slate::NavigationController m_searchNavigation;
         Software::Slate::NavigationController m_workspaceNavigation;
+        Software::Slate::EditorDocumentViewModel m_editor;
 
         Screen m_screen = Screen::Home;
         Screen m_returnScreen = Screen::Home;
@@ -172,21 +190,20 @@ namespace Software::Modes::Slate
         std::string m_promptTitle;
         std::string m_confirmMessage;
         std::string m_status = "ready";
+        double m_statusSeconds = 0.0;
         bool m_statusIsError = false;
         bool m_searchOverlayOpen = false;
+        SearchOverlayScope m_searchOverlayScope = SearchOverlayScope::Workspace;
+        Software::Slate::SearchMode m_searchMode = Software::Slate::SearchMode::FileNames;
         bool m_filterActive = false;
         bool m_focusPrompt = false;
         bool m_focusFilter = false;
         bool m_folderPickerActive = false;
+        FolderPickerAction m_folderPickerAction = FolderPickerAction::None;
         bool m_workspaceLoaded = false;
         bool m_editorTextFocused = false;
-        bool m_focusEditor = false;
-        int m_editorCursorPos = 0;
-        int m_editorRequestedCursorPos = -1;
-        std::size_t m_editorActiveLine = 0;
-        std::size_t m_editorScratchLine = static_cast<std::size_t>(-1);
-        std::string m_editorLineText;
         double m_lastScanSeconds = 0.0;
         double m_lastIndexSeconds = 0.0;
+        double m_nowSeconds = 0.0;
     };
 }

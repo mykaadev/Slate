@@ -49,7 +49,7 @@ namespace Software::Modes::Slate
             return;
         }
 
-        if (m_screen != Screen::FileTree && !io.KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        if (m_screen != Screen::FileTree && m_screen != Screen::Library && !io.KeyShift && IsKeyPressed(ImGuiKey_Slash))
         {
             BeginSearchOverlay(true);
             return;
@@ -62,17 +62,17 @@ namespace Software::Modes::Slate
 
         if (IsCtrlPressed(ImGuiKey_Q))
         {
-            context.quitRequested = true;
+            BeginConfirm(ConfirmAction::Quit, "quit Slate? y quit / esc cancel");
         }
     }
 
     void SlateAppMode::HandleListKeys()
     {
-        if (IsKeyPressed(ImGuiKey_DownArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
         {
             m_navigation.MoveNext();
         }
-        if (IsKeyPressed(ImGuiKey_UpArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
         {
             m_navigation.MovePrevious();
         }
@@ -123,24 +123,26 @@ namespace Software::Modes::Slate
         }
         else if (IsKeyPressed(ImGuiKey_Escape))
         {
+            const bool wasMovePicker = m_folderPickerAction == FolderPickerAction::MoveDestination;
             m_folderPickerActive = false;
-            m_screen = Screen::Home;
+            m_folderPickerAction = FolderPickerAction::None;
+            m_screen = wasMovePicker ? Screen::FileTree : Screen::Home;
             return;
         }
 
-        if (IsKeyPressed(ImGuiKey_DownArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
         {
             m_navigation.MoveNext();
         }
-        if (IsKeyPressed(ImGuiKey_UpArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
         {
             m_navigation.MovePrevious();
         }
-        if (IsKeyPressed(ImGuiKey_RightArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
         {
             ToggleSelectedFolder(true);
         }
-        if (IsKeyPressed(ImGuiKey_LeftArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
         {
             ToggleSelectedFolder(false);
         }
@@ -149,12 +151,23 @@ namespace Software::Modes::Slate
             ActivateSelectedTreeRow();
         }
 
+        if (m_filterActive)
+        {
+            return;
+        }
+
+        if (IsKeyPressed(ImGuiKey_A))
+        {
+            BeginFolderCreate();
+        }
+
         if (!folderPicker && IsKeyPressed(ImGuiKey_M) && m_navigation.HasSelection() && !m_treeRows.empty())
         {
             BeginRenameMove(m_treeRows[m_navigation.Selected()].relativePath);
         }
 
-        if (!folderPicker && IsKeyPressed(ImGuiKey_D) && m_navigation.HasSelection() && !m_treeRows.empty())
+        if (!folderPicker && (IsKeyPressed(ImGuiKey_D) || IsKeyPressed(ImGuiKey_Delete)) && m_navigation.HasSelection() &&
+            !m_treeRows.empty())
         {
             BeginDelete(m_treeRows[m_navigation.Selected()].relativePath);
         }
@@ -167,20 +180,30 @@ namespace Software::Modes::Slate
 
     void SlateAppMode::HandleSearchOverlayKeys()
     {
-        if (IsKeyPressed(ImGuiKey_DownArrow))
+        if (m_searchOverlayScope == SearchOverlayScope::Workspace && IsKeyPressed(ImGuiKey_Tab))
+        {
+            m_searchMode = m_searchMode == Software::Slate::SearchMode::FileNames
+                               ? Software::Slate::SearchMode::FullText
+                               : Software::Slate::SearchMode::FileNames;
+            m_searchNavigation.Reset();
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
         {
             m_searchNavigation.MoveNext();
         }
-        if (IsKeyPressed(ImGuiKey_UpArrow))
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
         {
             m_searchNavigation.MovePrevious();
         }
         if ((IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
             m_searchNavigation.HasSelection() && !m_visibleSearchResults.empty())
         {
-            const auto path = m_visibleSearchResults[m_searchNavigation.Selected()].relativePath;
-            CloseSearchOverlay();
-            OpenDocument(path);
+            if (m_searchOverlayScope == SearchOverlayScope::Document && ImGui::GetIO().KeyShift)
+            {
+                m_searchNavigation.MovePrevious();
+            }
+            OpenSelectedSearchResult();
             return;
         }
         if (IsKeyPressed(ImGuiKey_Escape))
@@ -220,14 +243,17 @@ namespace Software::Modes::Slate
         {
             std::fill(m_filterBuffer.begin(), m_filterBuffer.end(), '\0');
             m_folderPickerActive = false;
+            m_folderPickerAction = FolderPickerAction::None;
             m_navigation.Reset();
             m_screen = Screen::FileTree;
         }
-        else if (IsKeyPressed(ImGuiKey_G))
+        else if (IsKeyPressed(ImGuiKey_L))
         {
             std::fill(m_filterBuffer.begin(), m_filterBuffer.end(), '\0');
+            m_folderPickerActive = false;
+            m_folderPickerAction = FolderPickerAction::None;
             m_navigation.Reset();
-            m_screen = Screen::DocsIndex;
+            m_screen = Screen::Library;
         }
         else if (IsKeyPressed(ImGuiKey_W))
         {
@@ -237,8 +263,59 @@ namespace Software::Modes::Slate
         }
     }
 
+    void SlateAppMode::HandleLibraryKeys()
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        if (!io.KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        {
+            m_filterActive = true;
+            m_focusFilter = true;
+        }
+
+        if (m_filterActive)
+        {
+            if (IsKeyPressed(ImGuiKey_Escape))
+            {
+                m_filterActive = false;
+                return;
+            }
+        }
+        else if (IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_screen = Screen::Home;
+            return;
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        {
+            m_navigation.MoveNext();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        {
+            m_navigation.MovePrevious();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+        {
+            ToggleSelectedFolder(true);
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+        {
+            ToggleSelectedFolder(false);
+        }
+        if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+        {
+            ActivateSelectedTreeRow();
+        }
+    }
+
     void SlateAppMode::HandleEditorKeys(Software::Core::Runtime::AppContext& context)
     {
+        if (IsCtrlPressed(ImGuiKey_F) && m_documents.HasOpenDocument())
+        {
+            BeginDocumentFindOverlay(true);
+            return;
+        }
+
         if (IsCtrlPressed(ImGuiKey_V) && m_assets.HasClipboardImage() && m_documents.HasOpenDocument())
         {
             auto* document = m_documents.Active();
@@ -263,7 +340,6 @@ namespace Software::Modes::Slate
             if (IsKeyPressed(ImGuiKey_Escape))
             {
                 m_editorTextFocused = false;
-                m_focusEditor = false;
             }
             return;
         }
@@ -293,12 +369,14 @@ namespace Software::Modes::Slate
     void SlateAppMode::SetStatus(std::string message)
     {
         m_status = std::move(message);
+        m_statusSeconds = m_nowSeconds;
         m_statusIsError = false;
     }
 
     void SlateAppMode::SetError(std::string message)
     {
         m_status = std::move(message);
+        m_statusSeconds = m_nowSeconds;
         m_statusIsError = true;
     }
 }

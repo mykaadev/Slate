@@ -4,10 +4,171 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string_view>
 #include <utility>
 
 namespace Software::Slate
 {
+    namespace
+    {
+        bool StartsWith(std::string_view value, std::string_view prefix)
+        {
+            return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+        }
+
+        void AddSpan(std::vector<MarkdownInlineSpan>& spans,
+                     std::string text,
+                     bool bold,
+                     bool italic,
+                     bool code = false,
+                     bool link = false,
+                     bool image = false)
+        {
+            if (text.empty())
+            {
+                return;
+            }
+
+            if (!spans.empty() && spans.back().bold == bold && spans.back().italic == italic &&
+                spans.back().code == code && spans.back().link == link && spans.back().image == image)
+            {
+                spans.back().text += text;
+                return;
+            }
+
+            MarkdownInlineSpan span;
+            span.text = std::move(text);
+            span.bold = bold;
+            span.italic = italic;
+            span.code = code;
+            span.link = link;
+            span.image = image;
+            spans.push_back(std::move(span));
+        }
+
+        void ParseInlineInto(std::string_view text, bool bold, bool italic, std::vector<MarkdownInlineSpan>& spans)
+        {
+            std::string plain;
+            auto flushPlain = [&]() {
+                AddSpan(spans, std::move(plain), bold, italic);
+                plain.clear();
+            };
+
+            for (std::size_t i = 0; i < text.size();)
+            {
+                if (StartsWith(text.substr(i), "!["))
+                {
+                    const std::size_t closeLabel = text.find(']', i + 2);
+                    if (closeLabel != std::string_view::npos && closeLabel + 1 < text.size() &&
+                        text[closeLabel + 1] == '(')
+                    {
+                        const std::size_t closeTarget = text.find(')', closeLabel + 2);
+                        if (closeTarget != std::string_view::npos)
+                        {
+                            flushPlain();
+                            const std::string_view alt = text.substr(i + 2, closeLabel - i - 2);
+                            const std::string_view target = text.substr(closeLabel + 2, closeTarget - closeLabel - 2);
+                            std::string label = "[image";
+                            if (!alt.empty())
+                            {
+                                label += ": ";
+                                label += alt;
+                            }
+                            else if (!target.empty())
+                            {
+                                label += ": ";
+                                label += fs::path(std::string(target)).filename().string();
+                            }
+                            label += "]";
+                            AddSpan(spans, std::move(label), bold, italic, false, true, true);
+                            i = closeTarget + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                if (StartsWith(text.substr(i), "[["))
+                {
+                    const std::size_t close = text.find("]]", i + 2);
+                    if (close != std::string_view::npos)
+                    {
+                        flushPlain();
+                        std::string inner(text.substr(i + 2, close - i - 2));
+                        const std::size_t pipe = inner.find('|');
+                        AddSpan(spans, pipe == std::string::npos ? inner : inner.substr(pipe + 1), bold, italic,
+                                false, true);
+                        i = close + 2;
+                        continue;
+                    }
+                }
+
+                if (text[i] == '[')
+                {
+                    const std::size_t closeLabel = text.find(']', i + 1);
+                    if (closeLabel != std::string_view::npos && closeLabel + 1 < text.size() &&
+                        text[closeLabel + 1] == '(')
+                    {
+                        const std::size_t closeTarget = text.find(')', closeLabel + 2);
+                        if (closeTarget != std::string_view::npos)
+                        {
+                            flushPlain();
+                            ParseInlineInto(text.substr(i + 1, closeLabel - i - 1), bold, italic, spans);
+                            if (!spans.empty())
+                            {
+                                spans.back().link = true;
+                            }
+                            i = closeTarget + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                if (text[i] == '`')
+                {
+                    const std::size_t close = text.find('`', i + 1);
+                    if (close != std::string_view::npos)
+                    {
+                        flushPlain();
+                        AddSpan(spans, std::string(text.substr(i + 1, close - i - 1)), bold, italic, true);
+                        i = close + 1;
+                        continue;
+                    }
+                }
+
+                if (StartsWith(text.substr(i), "**") || StartsWith(text.substr(i), "__"))
+                {
+                    const std::string_view marker = text.substr(i, 2);
+                    const std::size_t close = text.find(marker, i + 2);
+                    if (close != std::string_view::npos)
+                    {
+                        flushPlain();
+                        ParseInlineInto(text.substr(i + 2, close - i - 2), true, italic, spans);
+                        i = close + 2;
+                        continue;
+                    }
+                }
+
+                if ((text[i] == '*' || text[i] == '_') && i + 1 < text.size() && text[i + 1] != text[i])
+                {
+                    const char marker = text[i];
+                    const std::size_t close = text.find(marker, i + 1);
+                    if (close != std::string_view::npos)
+                    {
+                        flushPlain();
+                        ParseInlineInto(text.substr(i + 1, close - i - 1), bold, true, spans);
+                        i = close + 1;
+                        continue;
+                    }
+                }
+
+                plain.push_back(text[i]);
+                ++i;
+            }
+
+            flushPlain();
+        }
+    }
+
     MarkdownSummary MarkdownService::Parse(const std::string& text) const
     {
         MarkdownSummary summary;
@@ -121,6 +282,13 @@ namespace Software::Slate
             return summary.headings.front().title;
         }
         return fallbackPath.stem().string();
+    }
+
+    std::vector<MarkdownInlineSpan> MarkdownService::ParseInlineSpans(std::string_view text)
+    {
+        std::vector<MarkdownInlineSpan> spans;
+        ParseInlineInto(text, false, false, spans);
+        return spans;
     }
 
     void MarkdownService::ParseMarkdownLinks(const std::string& line, std::size_t lineNumber, std::size_t lineOffset,

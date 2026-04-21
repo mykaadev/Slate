@@ -1,6 +1,8 @@
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
+#include "App/Slate/EditorDocumentViewModel.h"
 #include "App/Slate/LinkService.h"
+#include "App/Slate/MarkdownService.h"
 #include "App/Slate/NavigationController.h"
 #include "App/Slate/SearchService.h"
 #include "App/Slate/WorkspaceService.h"
@@ -93,9 +95,20 @@ namespace
         Software::Slate::WorkspaceService workspace(root);
         Software::Slate::SearchService search;
         search.Rebuild(workspace);
-        const auto results = search.Query("shield");
-        CHECK(!results.empty());
-        CHECK(results.front().relativePath == fs::path("GDD.md"));
+        const auto filenameResults = search.Query("shield");
+        CHECK(filenameResults.empty());
+        const auto combatResults = search.Query("combat");
+        CHECK(!combatResults.empty());
+        CHECK(combatResults.front().relativePath == fs::path("GDD.md"));
+        const auto bodyResults = search.Query("shield", Software::Slate::SearchMode::FullText);
+        CHECK(!bodyResults.empty());
+        CHECK(bodyResults.front().relativePath == fs::path("GDD.md"));
+        CHECK(bodyResults.front().line == 2);
+
+        const auto docResults = Software::Slate::SearchService::QueryDocument("# Combat\nshield and shield\n", "shield");
+        CHECK(docResults.size() == 2);
+        CHECK(docResults.front().line == 2);
+        CHECK(docResults.front().column == 1);
         fs::remove_all(root);
     }
 
@@ -152,6 +165,30 @@ namespace
         fs::remove_all(root);
     }
 
+    void TestWorkspaceFolderOperations()
+    {
+        const fs::path root = MakeTempWorkspace();
+        WriteFile(root / "Docs" / "Systems" / "Combat.md", "# Combat\n");
+
+        Software::Slate::WorkspaceService workspace(root);
+        fs::path createdFolder;
+        CHECK(workspace.CreateFolder("Docs", "Systems", &createdFolder));
+        CHECK(createdFolder == fs::path("Docs/Systems-2"));
+        CHECK(fs::exists(root / createdFolder));
+        CHECK(workspace.MakeCollisionSafeFolderPath("Docs", "Systems") == fs::path("Docs/Systems-3"));
+
+        CHECK(workspace.CreateMarkdownFile(workspace.MakeCollisionSafeMarkdownPath(createdFolder, "AI.md"), "# AI\n", nullptr));
+        CHECK(workspace.RenameOrMove(createdFolder, "Docs/AI Systems"));
+        CHECK(fs::exists(root / "Docs" / "AI Systems" / "AI.md"));
+        CHECK(!fs::exists(root / createdFolder));
+
+        CHECK(workspace.DeletePath("Docs/AI Systems/AI.md"));
+        CHECK(!fs::exists(root / "Docs" / "AI Systems" / "AI.md"));
+        CHECK(workspace.DeletePath("Docs/AI Systems"));
+        CHECK(!fs::exists(root / "Docs" / "AI Systems"));
+        fs::remove_all(root);
+    }
+
     void TestTreeFilteringPreservesParents()
     {
         const fs::path root = MakeTempWorkspace();
@@ -179,6 +216,99 @@ namespace
         fs::remove_all(root);
     }
 
+    void TestCollapsedTreeHidesDescendants()
+    {
+        const fs::path root = MakeTempWorkspace();
+        WriteFile(root / "Root.md", "# Root\n");
+        WriteFile(root / "Docs" / "Systems" / "Combat.md", "# Combat\n");
+        WriteFile(root / "Journal" / "2026.md", "# Day\n");
+
+        Software::Slate::WorkspaceService workspace(root);
+        Software::Slate::CollapsedFolderSet collapsed;
+        for (const auto& entry : workspace.Entries())
+        {
+            if (entry.isDirectory)
+            {
+                collapsed.insert(Software::Slate::TreePathKey(entry.relativePath));
+            }
+        }
+
+        const auto rows =
+            Software::Slate::BuildTreeRows(workspace.Entries(), collapsed, "", Software::Slate::TreeViewMode::Files);
+
+        bool sawRoot = false;
+        bool sawDocs = false;
+        bool sawJournal = false;
+        bool sawSystems = false;
+        bool sawCombat = false;
+        for (const auto& row : rows)
+        {
+            sawRoot = sawRoot || row.relativePath == fs::path("Root.md");
+            sawDocs = sawDocs || row.relativePath == fs::path("Docs");
+            sawJournal = sawJournal || row.relativePath == fs::path("Journal");
+            sawSystems = sawSystems || row.relativePath == fs::path("Docs/Systems");
+            sawCombat = sawCombat || row.relativePath == fs::path("Docs/Systems/Combat.md");
+        }
+
+        CHECK(sawRoot);
+        CHECK(sawDocs);
+        CHECK(sawJournal);
+        CHECK(!sawSystems);
+        CHECK(!sawCombat);
+        fs::remove_all(root);
+    }
+
+    void TestLibraryTreeExcludesJournalAndPreservesParents()
+    {
+        const fs::path root = MakeTempWorkspace();
+        WriteFile(root / "Root.md", "# Root\n");
+        WriteFile(root / "Docs" / "Systems" / "Combat.md", "# Combat\n");
+        WriteFile(root / "Docs" / "Pitch.txt", "not markdown\n");
+        WriteFile(root / "Journal" / "2026" / "04" / "2026-04-21.md", "# Day\n");
+
+        Software::Slate::WorkspaceService workspace(root);
+        Software::Slate::CollapsedFolderSet collapsed;
+
+        const auto rows =
+            Software::Slate::BuildTreeRows(workspace.Entries(), collapsed, "combat", Software::Slate::TreeViewMode::Library);
+
+        bool sawRoot = false;
+        bool sawDocs = false;
+        bool sawSystems = false;
+        bool sawCombat = false;
+        bool sawJournal = false;
+        bool sawPitch = false;
+        for (const auto& row : rows)
+        {
+            sawRoot = sawRoot || row.relativePath == fs::path("Root.md");
+            sawDocs = sawDocs || row.relativePath == fs::path("Docs");
+            sawSystems = sawSystems || row.relativePath == fs::path("Docs/Systems");
+            sawCombat = sawCombat || row.relativePath == fs::path("Docs/Systems/Combat.md");
+            sawJournal = sawJournal || row.relativePath.generic_string().rfind("Journal", 0) == 0;
+            sawPitch = sawPitch || row.relativePath == fs::path("Docs/Pitch.txt");
+        }
+
+        CHECK(!sawRoot);
+        CHECK(sawDocs);
+        CHECK(sawSystems);
+        CHECK(sawCombat);
+        CHECK(!sawJournal);
+        CHECK(!sawPitch);
+
+        const auto unfiltered =
+            Software::Slate::BuildTreeRows(workspace.Entries(), collapsed, "", Software::Slate::TreeViewMode::Library);
+        sawRoot = false;
+        sawJournal = false;
+        for (const auto& row : unfiltered)
+        {
+            sawRoot = sawRoot || row.relativePath == fs::path("Root.md");
+            sawJournal = sawJournal || row.relativePath.generic_string().rfind("Journal", 0) == 0;
+        }
+        CHECK(sawRoot);
+        CHECK(!sawJournal);
+        fs::remove_all(root);
+    }
+
     void TestArrowNavigationController()
     {
         Software::Slate::NavigationController nav;
@@ -191,6 +321,71 @@ namespace
         CHECK(nav.Selected() == 2);
         nav.SetSelected(99);
         CHECK(nav.Selected() == 2);
+    }
+
+    void TestEditorDocumentViewModel()
+    {
+        Software::Slate::EditorDocumentViewModel editor;
+        editor.Load("# Title\nbody\nlast", "\n");
+        CHECK(editor.Lines().size() == 3);
+        CHECK(editor.ActiveLine() == 0);
+        editor.SetActiveLine(1, 4);
+        CHECK(editor.ActiveLineText() == "body");
+        editor.ReplaceActiveLine("body text");
+        editor.SetCaretColumn(4);
+        CHECK(editor.SplitActiveLine());
+        CHECK(editor.ActiveLine() == 2);
+        CHECK(editor.ActiveLineText() == " text");
+        CHECK(editor.ToText() == "# Title\nbody\n text\nlast");
+        CHECK(editor.MergeActiveLineWithPrevious());
+        CHECK(editor.ActiveLineText() == "body text");
+        CHECK(editor.ToText() == "# Title\nbody text\nlast");
+        editor.SetCaretColumn(static_cast<int>(editor.ActiveLineText().size()));
+        CHECK(editor.MergeActiveLineWithNext());
+        CHECK(editor.ActiveLineText() == "body textlast");
+        editor.SetCaretColumn(4);
+        CHECK(editor.InsertTextAtCursor("\nnew"));
+        CHECK(editor.ActiveLineText() == "new textlast");
+        CHECK(editor.ToText() == "# Title\nbody\nnew textlast");
+        editor.SetActiveLine(0, 20);
+        editor.MoveActiveLine(1);
+        CHECK(editor.CaretColumn() == 4);
+    }
+
+    void TestEditorSingleCharacterDeletionDoesNotMergeLines()
+    {
+        Software::Slate::EditorDocumentViewModel editor;
+        editor.Load("previous\na", "\n");
+        editor.SetActiveLine(1, 1);
+        editor.ReplaceActiveLine("");
+        CHECK(editor.ActiveLine() == 1);
+        CHECK(editor.ToText() == "previous\n");
+        CHECK(editor.MergeActiveLineWithPrevious());
+        CHECK(editor.ToText() == "previous");
+    }
+
+    void TestMarkdownInlineSpans()
+    {
+        const auto spans =
+            Software::Slate::MarkdownService::ParseInlineSpans("plain **bold** *italic* `code` [link](x) [[Wiki|label]] <u>under</u>");
+        bool sawBold = false;
+        bool sawItalic = false;
+        bool sawCode = false;
+        bool sawLink = false;
+        bool sawUnderlineSource = false;
+        for (const auto& span : spans)
+        {
+            sawBold = sawBold || (span.text == "bold" && span.bold);
+            sawItalic = sawItalic || (span.text == "italic" && span.italic);
+            sawCode = sawCode || (span.text == "code" && span.code);
+            sawLink = sawLink || ((span.text == "link" || span.text == "label") && span.link);
+            sawUnderlineSource = sawUnderlineSource || span.text.find("<u>under</u>") != std::string::npos;
+        }
+        CHECK(sawBold);
+        CHECK(sawItalic);
+        CHECK(sawCode);
+        CHECK(sawLink);
+        CHECK(sawUnderlineSource);
     }
 
     void TestWorkspaceRegistry()
@@ -227,8 +422,14 @@ int main()
     TestLinksRewrite();
     TestDailyAndAssets();
     TestCollisionSafeNotePaths();
+    TestWorkspaceFolderOperations();
     TestTreeFilteringPreservesParents();
+    TestCollapsedTreeHidesDescendants();
+    TestLibraryTreeExcludesJournalAndPreservesParents();
     TestArrowNavigationController();
+    TestEditorDocumentViewModel();
+    TestEditorSingleCharacterDeletionDoesNotMergeLines();
+    TestMarkdownInlineSpans();
     TestWorkspaceRegistry();
     std::cout << "SlateCoreTests passed\n";
     return 0;
