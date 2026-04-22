@@ -257,7 +257,6 @@ namespace Software::Slate
 
         DestroyWindowResources();
         m_parentWindow = nativeHandle;
-        m_themeApplied = false;
 #else
         (void)nativeHandle;
 #endif
@@ -443,6 +442,11 @@ namespace Software::Slate
             ::SetFocus(static_cast<HWND>(m_parentWindow));
         }
 #endif
+    }
+
+    void ScintillaEditorHost::SetEditorSettings(const EditorSettings& settings)
+    {
+        m_editorSettings = EditorSettingsService::Sanitize(settings);
     }
 
     void ScintillaEditorHost::JumpToLine(std::size_t line)
@@ -642,15 +646,12 @@ namespace Software::Slate
         call(SCI_SETADDITIONALSELECTIONTYPING, 1, 0);
         call(SCI_SETMULTIPASTE, SC_MULTIPASTE_EACH, 0);
         call(SCI_SETCARETWIDTH, 2, 0);
-        call(SCI_SETCARETLINEVISIBLE, 1, 0);
         call(SCI_SETMARGINWIDTHN, 0, 0);
         call(SCI_SETMARGINWIDTHN, 1, 0);
         call(SCI_SETMARGINWIDTHN, 2, 0);
         call(SCI_SETMARGINWIDTHN, 3, 0);
         call(SCI_SETMARGINLEFT, 0, 16);
         call(SCI_SETMARGINRIGHT, 0, 16);
-        call(SCI_SETWRAPMODE, SC_WRAP_WORD, 0);
-        call(SCI_SETHSCROLLBAR, 0, 0);
         call(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE, 0);
         call(SCI_SETEXTRAASCENT, 3, 0);
         call(SCI_SETEXTRADESCENT, 3, 0);
@@ -664,7 +665,6 @@ namespace Software::Slate
              reinterpret_cast<LPARAM>("1"));
         call(SCI_SETILEXER, 0, reinterpret_cast<LPARAM>(lmMarkdown.Create()));
 
-        m_themeApplied = false;
 #endif
     }
 
@@ -684,51 +684,35 @@ namespace Software::Slate
         const COLORREF selection = ToColorRef(MixColor(UI::Background, UI::Cyan, 0.20f));
         const COLORREF caretLine = ToColorRef(MixColor(UI::Background, UI::Panel, 0.72f));
 
-        static COLORREF lastBackground = 0;
-        static COLORREF lastPrimary = 0;
-        static COLORREF lastMuted = 0;
-        static COLORREF lastCyan = 0;
-        static COLORREF lastPanel = 0;
-        static COLORREF lastSelection = 0;
-        static COLORREF lastCaretLine = 0;
-
-        if (m_themeApplied &&
-            background == lastBackground &&
-            primary == lastPrimary &&
-            muted == lastMuted &&
-            cyan == lastCyan &&
-            panel == lastPanel &&
-            selection == lastSelection &&
-            caretLine == lastCaretLine)
-        {
-            return;
-        }
-
-        lastBackground = background;
-        lastPrimary = primary;
-        lastMuted = muted;
-        lastCyan = cyan;
-        lastPanel = panel;
-        lastSelection = selection;
-        lastCaretLine = caretLine;
-
         const auto call = [this](unsigned int message, uintptr_t wParam = 0, intptr_t lParam = 0) {
             return ::SendMessageW(static_cast<HWND>(m_editorWindow), message, static_cast<WPARAM>(wParam),
                                   static_cast<LPARAM>(lParam));
         };
 
+        const int fontSize = m_editorSettings.fontSize;
+        const int lineSpacing = m_editorSettings.lineSpacing;
+        const int tabWidth = m_editorSettings.tabWidth;
+
         call(SCI_STYLESETFONT, STYLE_DEFAULT, reinterpret_cast<LPARAM>("Cascadia Mono"));
-        call(SCI_STYLESETSIZE, STYLE_DEFAULT, 15);
+        call(SCI_STYLESETSIZE, STYLE_DEFAULT, fontSize);
         call(SCI_STYLESETFORE, STYLE_DEFAULT, primary);
         call(SCI_STYLESETBACK, STYLE_DEFAULT, background);
         call(SCI_STYLECLEARALL, 0, 0);
 
         call(SCI_SETCARETFORE, primary, 0);
         call(SCI_SETCARETLINEBACK, caretLine, 0);
+        call(SCI_SETCARETLINEVISIBLE, m_editorSettings.highlightCurrentLine ? 1 : 0, 0);
         call(SCI_SETSELBACK, 1, selection);
         call(SCI_SETSELFORE, 0, 0);
         call(SCI_SETWHITESPACEFORE, 1, muted);
         call(SCI_SETWHITESPACEBACK, 1, background);
+        call(SCI_SETWRAPMODE, m_editorSettings.wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE, 0);
+        call(SCI_SETHSCROLLBAR, m_editorSettings.wordWrap ? 0 : 1, 0);
+        call(SCI_SETEXTRAASCENT, lineSpacing, 0);
+        call(SCI_SETEXTRADESCENT, lineSpacing, 0);
+        call(SCI_SETUSETABS, m_editorSettings.indentWithTabs ? 1 : 0, 0);
+        call(SCI_SETTABWIDTH, tabWidth, 0);
+        call(SCI_SETINDENT, tabWidth, 0);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_DEFAULT, primary);
         call(SCI_STYLESETBACK, SCE_MARKDOWN_DEFAULT, background);
@@ -756,12 +740,12 @@ namespace Software::Slate
         call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER1, 1);
         call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER2, 1);
         call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER3, 1);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER1, 21);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER2, 18);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER3, 16);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER4, 15);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER5, 15);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER6, 15);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER1, fontSize + 6);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER2, fontSize + 3);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER3, fontSize + 1);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER4, fontSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER5, fontSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER6, fontSize);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_ULIST_ITEM, ToColorRef(UI::MarkdownBullet));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_OLIST_ITEM, ToColorRef(UI::MarkdownBullet));
@@ -783,10 +767,7 @@ namespace Software::Slate
         call(SCI_STYLESETFORE, SCE_MARKDOWN_STRIKEOUT, muted);
         call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, muted);
 
-        call(SCI_SETCARETLINEVISIBLE, 1, 0);
         call(SCI_COLOURISE, 0, -1);
-
-        m_themeApplied = true;
 #endif
     }
 
@@ -903,7 +884,8 @@ namespace Software::Slate
                 m_pendingCommands |= CommandMask(NativeEditorCommand::Find);
                 return 0;
             }
-            if (ctrlPressed && (wParam == 'V' || wParam == 'v') && ::IsClipboardFormatAvailable(CF_DIB) != 0)
+            if (m_editorSettings.pasteClipboardImages &&
+                ctrlPressed && (wParam == 'V' || wParam == 'v') && ::IsClipboardFormatAvailable(CF_DIB) != 0)
             {
                 m_pendingCommands |= CommandMask(NativeEditorCommand::PasteClipboardImage);
                 return 0;
@@ -913,7 +895,17 @@ namespace Software::Slate
                 m_pendingCommands |= CommandMask(NativeEditorCommand::Escape);
                 return 0;
             }
-            if (!ctrlPressed && !altPressed && wParam == VK_RETURN && HandleSmartEnter())
+            if (m_editorSettings.autoListContinuation &&
+                !ctrlPressed && !altPressed && wParam == VK_RETURN && HandleSmartEnter())
+            {
+                return 0;
+            }
+        }
+        else if (message == WM_CHAR)
+        {
+            const bool controlCharacter = wParam < 32;
+            const bool allowCommonControls = wParam == '\b' || wParam == '\t' || wParam == '\n' || wParam == '\r';
+            if ((ctrlPressed && !altPressed && controlCharacter) || wParam == 27 || (controlCharacter && !allowCommonControls))
             {
                 return 0;
             }

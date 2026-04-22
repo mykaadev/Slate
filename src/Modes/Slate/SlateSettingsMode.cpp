@@ -1,5 +1,6 @@
 #include "Modes/Slate/SlateSettingsMode.h"
 
+#include "App/Slate/EditorSettingsService.h"
 #include "App/Slate/SlateModeIds.h"
 #include "App/Slate/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
@@ -7,11 +8,133 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <array>
 #include <vector>
 
 namespace Software::Modes::Slate
 {
     using namespace Software::Slate::UI;
+
+    namespace
+    {
+        enum class SettingsRow
+        {
+            ShellPreset = 0,
+            MarkdownPreset,
+            FontSize,
+            LineSpacing,
+            PageWidth,
+            WordWrap,
+            CaretLine,
+            TabWidth,
+            IndentMode,
+            AutoListContinuation,
+            PasteClipboardImages,
+            Count
+        };
+
+        struct NamedIntOption
+        {
+            int value = 0;
+            const char* label = "";
+        };
+
+        const std::array<NamedIntOption, 5>& FontSizeOptions()
+        {
+            static constexpr std::array<NamedIntOption, 5> options{{
+                {13, "13"},
+                {14, "14"},
+                {15, "15"},
+                {17, "17"},
+                {19, "19"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 4>& LineSpacingOptions()
+        {
+            static constexpr std::array<NamedIntOption, 4> options{{
+                {1, "tight"},
+                {2, "compact"},
+                {3, "balanced"},
+                {5, "relaxed"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 4>& PageWidthOptions()
+        {
+            static constexpr std::array<NamedIntOption, 4> options{{
+                {720, "narrow"},
+                {880, "standard"},
+                {980, "wide"},
+                {0, "fluid"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 2>& TabWidthOptions()
+        {
+            static constexpr std::array<NamedIntOption, 2> options{{
+                {2, "2 spaces"},
+                {4, "4 spaces"},
+            }};
+            return options;
+        }
+
+        template <typename ValueType>
+        ValueType Cycle(const std::vector<ValueType>& values, const ValueType& current, int delta)
+        {
+            if (values.empty())
+            {
+                return current;
+            }
+
+            auto it = std::find(values.begin(), values.end(), current);
+            std::size_t index = it == values.end() ? 0 : static_cast<std::size_t>(it - values.begin());
+            const int next = static_cast<int>(index) + delta;
+            index = static_cast<std::size_t>((next % static_cast<int>(values.size()) + static_cast<int>(values.size())) %
+                                             static_cast<int>(values.size()));
+            return values[index];
+        }
+
+        template <typename OptionArray>
+        int CycleNamedOption(const OptionArray& options, int current, int delta)
+        {
+            std::vector<int> values;
+            values.reserve(options.size());
+            for (const auto& option : options)
+            {
+                values.push_back(option.value);
+            }
+            return Cycle(values, current, delta);
+        }
+
+        template <typename OptionArray>
+        std::string LabelForNamedOption(const OptionArray& options, int value)
+        {
+            for (const auto& option : options)
+            {
+                if (option.value == value)
+                {
+                    return option.label;
+                }
+            }
+            return std::to_string(value);
+        }
+
+        const char* OnOffLabel(bool value)
+        {
+            return value ? "on" : "off";
+        }
+
+        void DrawSettingRow(bool selected, const char* label, std::string_view value)
+        {
+            const std::string text(value);
+            ImGui::TextColored(selected ? Green : Primary, "%s %-18s %s",
+                               selected ? ">" : " ", label, text.c_str());
+        }
+    }
 
     const char* SlateSettingsMode::ModeName() const
     {
@@ -28,22 +151,7 @@ namespace Software::Modes::Slate
             return;
         }
 
-        const auto cycle = [](const std::vector<std::string>& ids, const std::string& current, int delta) {
-            auto it = std::find(ids.begin(), ids.end(), current);
-            std::size_t index = it == ids.end() ? 0 : static_cast<std::size_t>(it - ids.begin());
-            const std::size_t count = ids.size();
-            if (count == 0)
-            {
-                return current;
-            }
-
-            const int next = static_cast<int>(index) + delta;
-            index = static_cast<std::size_t>((next % static_cast<int>(count) + static_cast<int>(count)) %
-                                             static_cast<int>(count));
-            return ids[index];
-        };
-
-        auto applyAndSave = [&]() {
+        auto saveAppearance = [&]() {
             std::string error;
             if (!workspace.SaveThemeSettings(&error))
             {
@@ -51,13 +159,25 @@ namespace Software::Modes::Slate
             }
             else
             {
-                SetStatus("theme updated");
+                SetStatus("appearance updated");
+            }
+        };
+
+        auto saveEditor = [&]() {
+            std::string error;
+            if (!workspace.SaveEditorSettings(&error))
+            {
+                SetError(error);
+            }
+            else
+            {
+                SetStatus("editor updated");
             }
         };
 
         if (handleInput)
         {
-            ui.navigation.SetCount(2);
+            ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
             if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
             {
                 ui.navigation.MoveNext();
@@ -66,42 +186,91 @@ namespace Software::Modes::Slate
             {
                 ui.navigation.MovePrevious();
             }
-            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+
+            const int delta = (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) ? -1 :
+                               (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) ||
+                                IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+                                   ? 1
+                                   : 0);
+            if (delta != 0)
             {
-                auto settings = workspace.CurrentThemeSettings();
-                if (ui.navigation.Selected() == 0)
+                auto themeSettings = workspace.CurrentThemeSettings();
+                auto editorSettings = workspace.CurrentEditorSettings();
+                const auto row = static_cast<SettingsRow>(ui.navigation.Selected());
+
+                switch (row)
                 {
-                    settings.shellPreset = cycle(Software::Slate::ThemeService::ShellPresetIds(), settings.shellPreset, -1);
+                case SettingsRow::ShellPreset:
+                    themeSettings.shellPreset =
+                        Cycle(workspace.Theme().ShellPresetIds(), themeSettings.shellPreset, delta);
+                    workspace.SetThemeSettings(themeSettings);
+                    saveAppearance();
+                    break;
+                case SettingsRow::MarkdownPreset:
+                    themeSettings.markdownPreset =
+                        Cycle(workspace.Theme().MarkdownPresetIds(), themeSettings.markdownPreset, delta);
+                    workspace.SetThemeSettings(themeSettings);
+                    saveAppearance();
+                    break;
+                case SettingsRow::FontSize:
+                    editorSettings.fontSize = CycleNamedOption(FontSizeOptions(), editorSettings.fontSize, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::LineSpacing:
+                    editorSettings.lineSpacing = CycleNamedOption(LineSpacingOptions(), editorSettings.lineSpacing, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::PageWidth:
+                    editorSettings.pageWidth = CycleNamedOption(PageWidthOptions(), editorSettings.pageWidth, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::WordWrap:
+                    editorSettings.wordWrap = !editorSettings.wordWrap;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::CaretLine:
+                    editorSettings.highlightCurrentLine = !editorSettings.highlightCurrentLine;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::TabWidth:
+                    editorSettings.tabWidth = CycleNamedOption(TabWidthOptions(), editorSettings.tabWidth, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::IndentMode:
+                    editorSettings.indentWithTabs = !editorSettings.indentWithTabs;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::AutoListContinuation:
+                    editorSettings.autoListContinuation = !editorSettings.autoListContinuation;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::PasteClipboardImages:
+                    editorSettings.pasteClipboardImages = !editorSettings.pasteClipboardImages;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::Count:
+                    break;
                 }
-                else
-                {
-                    settings.markdownPreset =
-                        cycle(Software::Slate::ThemeService::MarkdownPresetIds(), settings.markdownPreset, -1);
-                }
-                workspace.SetThemeSettings(settings);
-                applyAndSave();
             }
-            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) || IsKeyPressed(ImGuiKey_Enter) ||
-                IsKeyPressed(ImGuiKey_KeypadEnter))
-            {
-                auto settings = workspace.CurrentThemeSettings();
-                if (ui.navigation.Selected() == 0)
-                {
-                    settings.shellPreset = cycle(Software::Slate::ThemeService::ShellPresetIds(), settings.shellPreset, 1);
-                }
-                else
-                {
-                    settings.markdownPreset =
-                        cycle(Software::Slate::ThemeService::MarkdownPresetIds(), settings.markdownPreset, 1);
-                }
-                workspace.SetThemeSettings(settings);
-                applyAndSave();
-            }
+
             if (IsKeyPressed(ImGuiKey_R))
             {
                 workspace.SetThemeSettings(Software::Slate::ThemeService::DefaultSettings());
-                applyAndSave();
+                workspace.SetEditorSettings(Software::Slate::EditorSettingsService::DefaultSettings());
+                saveAppearance();
+                saveEditor();
+                SetStatus("settings reset");
             }
+
             if (IsKeyPressed(ImGuiKey_Escape))
             {
                 ShowHome(context);
@@ -109,21 +278,43 @@ namespace Software::Modes::Slate
             }
         }
 
-        const auto settings = workspace.CurrentThemeSettings();
-        ui.navigation.SetCount(2);
+        const auto themeSettings = workspace.CurrentThemeSettings();
+        const auto editorSettings = workspace.CurrentEditorSettings();
+        ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
 
         ImGui::TextColored(Cyan, "settings");
         ImGui::Separator();
-        ImGui::TextColored(Muted, "Theme changes save to this workspace.");
+        ImGui::TextColored(Muted, "Appearance presets are file-backed. Add your own in .slate/presets/.");
         ImGui::Dummy(ImVec2(1.0f, 10.0f));
 
-        const bool shellSelected = ui.navigation.Selected() == 0;
-        const bool markdownSelected = ui.navigation.Selected() == 1;
-        ImGui::TextColored(shellSelected ? Green : Primary, "%s overall theme     %s", shellSelected ? ">" : " ",
-                           Software::Slate::ThemeService::ShellPresetLabel(settings.shellPreset).c_str());
-        ImGui::TextColored(markdownSelected ? Green : Primary, "%s markdown colors  %s",
-                           markdownSelected ? ">" : " ",
-                           Software::Slate::ThemeService::MarkdownPresetLabel(settings.markdownPreset).c_str());
+        ImGui::TextColored(Muted, "appearance");
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::ShellPreset),
+                       "shell palette",
+                       workspace.Theme().ShellPresetLabel(themeSettings.shellPreset));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::MarkdownPreset),
+                       "markdown accents",
+                       workspace.Theme().MarkdownPresetLabel(themeSettings.markdownPreset));
+
+        ImGui::Dummy(ImVec2(1.0f, 10.0f));
+        ImGui::TextColored(Muted, "editor");
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::FontSize),
+                       "font size", LabelForNamedOption(FontSizeOptions(), editorSettings.fontSize));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::LineSpacing),
+                       "line spacing", LabelForNamedOption(LineSpacingOptions(), editorSettings.lineSpacing));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PageWidth),
+                       "page width", LabelForNamedOption(PageWidthOptions(), editorSettings.pageWidth));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::WordWrap),
+                       "word wrap", OnOffLabel(editorSettings.wordWrap));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::CaretLine),
+                       "caret line", OnOffLabel(editorSettings.highlightCurrentLine));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::TabWidth),
+                       "tab width", LabelForNamedOption(TabWidthOptions(), editorSettings.tabWidth));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::IndentMode),
+                       "indentation", editorSettings.indentWithTabs ? "tabs" : "spaces");
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::AutoListContinuation),
+                       "smart lists", OnOffLabel(editorSettings.autoListContinuation));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PasteClipboardImages),
+                       "paste images", OnOffLabel(editorSettings.pasteClipboardImages));
 
         ImGui::Dummy(ImVec2(1.0f, 14.0f));
         ImGui::Separator();
@@ -140,11 +331,14 @@ namespace Software::Modes::Slate
         DrawMarkdownLine("A [link](Docs/Combat.md), **bold**, *italic*, and `code`.", previewInCodeFence);
         DrawMarkdownLine("| stat | value |", previewInCodeFence);
         DrawMarkdownLine("![](assets/encounter/board.png)", previewInCodeFence);
+
+        ImGui::Dummy(ImVec2(1.0f, 10.0f));
+        ImGui::TextColored(Muted, "Editor settings save to .slate/editor.tsv. Appearance choices save to .slate/theme.tsv.");
     }
 
     std::string SlateSettingsMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
         (void)context;
-        return "(up/down) choose   (left/right) change   (r) reset   (esc) home";
+        return "(up/down) choose   (left/right) change   (r) reset all   (esc) home";
     }
 }

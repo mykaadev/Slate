@@ -236,6 +236,13 @@ if(WIN32)
     )
 endif()
 
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/slate"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/slate"
+    COMMENT "Copying Slate preset assets"
+)
+
 # ========================================================================
 # Tests
 # ========================================================================
@@ -287,6 +294,11 @@ install(TARGETS ${PROJECT_NAME}
 install(FILES
     "${CMAKE_SOURCE_DIR}/README.md"
     DESTINATION "docs"
+)
+
+install(DIRECTORY
+    "${CMAKE_SOURCE_DIR}/assets/slate"
+    DESTINATION "assets"
 )
 
 set(CPACK_GENERATOR "ZIP")

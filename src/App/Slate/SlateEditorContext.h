@@ -51,6 +51,7 @@ namespace Software::Slate
         bool NativeEditorAvailable() const;
         bool NativeEditorVisible() const;
         void SetNativeEditorVisible(bool visible);
+        void SetNativeEditorSettings(const EditorSettings& settings);
         void RenderNativeEditor(const DocumentService::Document& document,
                                 DocumentService& documents,
                                 double elapsedSeconds,

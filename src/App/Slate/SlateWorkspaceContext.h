@@ -2,6 +2,7 @@
 
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
+#include "App/Slate/EditorSettingsService.h"
 #include "App/Slate/LinkService.h"
 #include "App/Slate/SearchService.h"
 #include "App/Slate/ThemeService.h"
@@ -45,6 +46,9 @@ namespace Software::Slate
         const ThemeSettings& CurrentThemeSettings() const;
         void SetThemeSettings(const ThemeSettings& settings);
         bool SaveThemeSettings(std::string* error = nullptr);
+        const EditorSettings& CurrentEditorSettings() const;
+        void SetEditorSettings(const EditorSettings& settings);
+        bool SaveEditorSettings(std::string* error = nullptr);
 
         bool OpenWorkspace(const fs::path& root, std::string* error = nullptr);
         bool OpenVault(const WorkspaceVault& vault, std::string* error = nullptr);
@@ -74,8 +78,10 @@ namespace Software::Slate
         LinkService m_links;
         AssetService m_assets;
         ThemeService m_theme;
+        EditorSettingsService m_editorSettingsService;
         WorkspaceRegistryService m_workspaceRegistry;
         ThemeSettings m_themeSettings = ThemeService::DefaultSettings();
+        EditorSettings m_editorSettings = EditorSettingsService::DefaultSettings();
         std::string m_backgroundError;
         double m_lastScanSeconds = 0.0;
         double m_lastIndexSeconds = 0.0;

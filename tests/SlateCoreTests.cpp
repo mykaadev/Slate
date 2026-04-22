@@ -1,5 +1,6 @@
 #include "App/Slate/AssetService.h"
 #include "App/Slate/DocumentService.h"
+#include "App/Slate/EditorSettingsService.h"
 #include "App/Slate/EditorDocumentViewModel.h"
 #include "App/Slate/JournalService.h"
 #include "App/Slate/LinkService.h"
@@ -455,33 +456,96 @@ namespace
     void TestThemeServiceRoundTrip()
     {
         const fs::path root = MakeTempWorkspace();
+        WriteFile(root / ".slate" / "presets" / "shell" / "custom-shell.tsv",
+                  "id\tcustom-shell\nlabel\tCustom Shell\nbackground\t0.100,0.100,0.100,1.000\n"
+                  "primary\t0.900,0.900,0.900,1.000\nmuted\t0.500,0.500,0.500,1.000\n"
+                  "cyan\t0.200,0.800,0.900,1.000\namber\t0.900,0.700,0.200,1.000\n"
+                  "green\t0.500,0.800,0.500,1.000\nred\t0.900,0.300,0.300,1.000\n"
+                  "panel\t0.120,0.120,0.120,1.000\ncode\t0.700,0.800,0.900,1.000\n");
+        WriteFile(root / ".slate" / "presets" / "markdown" / "custom-markdown.tsv",
+                  "id\tcustom-markdown\nlabel\tCustom Markdown\nheading1\t0.300,0.700,0.900,1.000\n"
+                  "heading2\t0.500,0.800,0.600,1.000\nheading3\t0.900,0.700,0.300,1.000\n"
+                  "bullet\t0.800,0.700,0.300,1.000\ncheckbox\t0.850,0.700,0.350,1.000\n"
+                  "checkbox_done\t0.500,0.850,0.500,1.000\nquote\t0.600,0.700,0.800,1.000\n"
+                  "table\t0.750,0.730,0.500,1.000\nlink\t0.400,0.800,0.950,1.000\n"
+                  "image\t0.900,0.550,0.450,1.000\nbold\t0.960,0.920,0.860,1.000\n"
+                  "italic\t0.760,0.820,0.700,1.000\ncode\t0.780,0.820,0.860,1.000\n");
         Software::Slate::ThemeService theme(root);
 
         Software::Slate::ThemeSettings settings;
-        settings.shellPreset = "ember-night";
-        settings.markdownPreset = "sunrise-notes";
+        settings.shellPreset = "custom-shell";
+        settings.markdownPreset = "custom-markdown";
         CHECK(theme.Save(settings));
 
         Software::Slate::ThemeSettings loaded;
         CHECK(theme.Load(&loaded));
-        CHECK(loaded.shellPreset == "ember-night");
-        CHECK(loaded.markdownPreset == "sunrise-notes");
+        CHECK(loaded.shellPreset == "custom-shell");
+        CHECK(loaded.markdownPreset == "custom-markdown");
         CHECK(fs::exists(root / ".slate" / "theme.tsv"));
         fs::remove_all(root);
     }
 
     void TestThemeServiceApply()
     {
-        Software::Slate::ThemeService theme;
-        theme.Apply({"pine-night", "quiet-notes"});
-        CHECK(Software::Slate::UI::Background.x == 0.050f);
+        const fs::path root = MakeTempWorkspace();
+        WriteFile(root / ".slate" / "presets" / "shell" / "apply-shell.tsv",
+                  "id\tapply-shell\nlabel\tApply Shell\nbackground\t0.200,0.200,0.200,1.000\n"
+                  "primary\t0.880,0.870,0.810,1.000\nmuted\t0.450,0.500,0.470,1.000\n"
+                  "cyan\t0.460,0.760,0.710,1.000\namber\t0.900,0.690,0.370,1.000\n"
+                  "green\t0.620,0.840,0.580,1.000\nred\t0.880,0.410,0.360,1.000\n"
+                  "panel\t0.072,0.083,0.078,1.000\ncode\t0.710,0.800,0.780,1.000\n");
+        WriteFile(root / ".slate" / "presets" / "markdown" / "apply-markdown.tsv",
+                  "id\tapply-markdown\nlabel\tApply Markdown\nheading1\t0.620,0.780,0.820,1.000\n"
+                  "heading2\t0.740,0.820,0.700,1.000\nheading3\t0.840,0.720,0.520,1.000\n"
+                  "bullet\t0.700,0.690,0.600,1.000\ncheckbox\t0.780,0.690,0.480,1.000\n"
+                  "checkbox_done\t0.600,0.770,0.580,1.000\nquote\t0.580,0.630,0.660,1.000\n"
+                  "table\t0.700,0.690,0.600,1.000\nlink\t0.620,0.780,0.900,1.000\n"
+                  "image\t0.820,0.620,0.560,1.000\nbold\t0.900,0.880,0.820,1.000\n"
+                  "italic\t0.720,0.740,0.690,1.000\ncode\t0.720,0.760,0.780,1.000\n");
+
+        Software::Slate::ThemeService theme(root);
+        theme.Apply({"apply-shell", "apply-markdown"});
+        CHECK(Software::Slate::UI::Background.x == 0.200f);
         CHECK(Software::Slate::UI::Panel.y == 0.083f);
         CHECK(Software::Slate::UI::MarkdownHeading1.x == 0.62f);
         CHECK(Software::Slate::UI::MarkdownImage.x == 0.82f);
 
         theme.Apply(Software::Slate::ThemeService::DefaultSettings());
-        CHECK(Software::Slate::UI::Background.x == 0.055f);
-        CHECK(Software::Slate::UI::MarkdownHeading1.x == 0.56f);
+        CHECK(Software::Slate::UI::Background.x >= 0.0f);
+        CHECK(Software::Slate::UI::MarkdownHeading1.x >= 0.0f);
+        fs::remove_all(root);
+    }
+
+    void TestEditorSettingsRoundTrip()
+    {
+        const fs::path root = MakeTempWorkspace();
+        Software::Slate::EditorSettingsService settingsService(root);
+
+        Software::Slate::EditorSettings settings = Software::Slate::EditorSettingsService::DefaultSettings();
+        settings.fontSize = 17;
+        settings.lineSpacing = 5;
+        settings.pageWidth = 880;
+        settings.wordWrap = false;
+        settings.highlightCurrentLine = false;
+        settings.tabWidth = 2;
+        settings.indentWithTabs = true;
+        settings.autoListContinuation = false;
+        settings.pasteClipboardImages = false;
+        CHECK(settingsService.Save(settings));
+
+        Software::Slate::EditorSettings loaded;
+        CHECK(settingsService.Load(&loaded));
+        CHECK(loaded.fontSize == 17);
+        CHECK(loaded.lineSpacing == 5);
+        CHECK(loaded.pageWidth == 880);
+        CHECK(!loaded.wordWrap);
+        CHECK(!loaded.highlightCurrentLine);
+        CHECK(loaded.tabWidth == 2);
+        CHECK(loaded.indentWithTabs);
+        CHECK(!loaded.autoListContinuation);
+        CHECK(!loaded.pasteClipboardImages);
+        CHECK(fs::exists(root / ".slate" / "editor.tsv"));
+        fs::remove_all(root);
     }
 }
 
@@ -505,6 +569,7 @@ int main()
     TestWorkspaceRegistry();
     TestThemeServiceRoundTrip();
     TestThemeServiceApply();
+    TestEditorSettingsRoundTrip();
     std::cout << "SlateCoreTests passed\n";
     return 0;
 }

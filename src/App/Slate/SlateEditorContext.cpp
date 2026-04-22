@@ -286,6 +286,14 @@ namespace Software::Slate
         }
     }
 
+    void SlateEditorContext::SetNativeEditorSettings(const EditorSettings& settings)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->SetEditorSettings(settings);
+        }
+    }
+
     void SlateEditorContext::RenderNativeEditor(const DocumentService::Document& document,
                                                 DocumentService& documents,
                                                 double elapsedSeconds,

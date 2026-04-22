@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/Slate/DocumentService.h"
+#include "App/Slate/EditorSettingsService.h"
 
 #include <cstdint>
 #include <string>
@@ -37,6 +38,7 @@ namespace Software::Slate
         bool IsFocused() const;
         void Focus();
         void ReleaseFocus();
+        void SetEditorSettings(const EditorSettings& settings);
 
         void JumpToLine(std::size_t line);
         bool InsertTextAtCursor(const std::string& text);
@@ -66,12 +68,12 @@ namespace Software::Slate
         fs::path m_loadedPath;
         std::string m_lastSyncedText;
         std::string m_lineEnding = "\n";
+        EditorSettings m_editorSettings = EditorSettingsService::DefaultSettings();
         bool m_visible = false;
         std::uint32_t m_pendingCommands = 0;
         int m_lastX = 0;
         int m_lastY = 0;
         int m_lastWidth = 0;
         int m_lastHeight = 0;
-        bool m_themeApplied = false;
     };
 }

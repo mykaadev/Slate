@@ -80,6 +80,8 @@ namespace Software::Modes::Slate
         auto& workspace = WorkspaceContext(context);
         auto& editor = EditorContext(context);
         auto& ui = UiState(context);
+        const auto& editorSettings = workspace.CurrentEditorSettings();
+        editor.SetNativeEditorSettings(editorSettings);
         if (!workspace.HasWorkspaceLoaded())
         {
             ShowWorkspaceSetup(context);
@@ -178,7 +180,8 @@ namespace Software::Modes::Slate
                 {
                     BeginSearchOverlay(true, context, SearchOverlayScope::Document);
                 }
-                else if (IsCtrlPressed(ImGuiKey_V) && workspace.Assets().HasClipboardImage() && workspace.Documents().HasOpenDocument())
+                else if (editorSettings.pasteClipboardImages &&
+                         IsCtrlPressed(ImGuiKey_V) && workspace.Assets().HasClipboardImage() && workspace.Documents().HasOpenDocument())
                 {
                     pasteClipboardImage();
                 }
@@ -231,6 +234,7 @@ namespace Software::Modes::Slate
                                      Software::Slate::DocumentService::Document& document)
     {
         auto& editor = EditorContext(context);
+        const auto& editorSettings = WorkspaceContext(context).CurrentEditorSettings();
 
         ImGui::TextColored(Muted, "%s", document.relativePath.generic_string().c_str());
         ImGui::SameLine();
@@ -247,7 +251,10 @@ namespace Software::Modes::Slate
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         if (editor.NativeEditorAvailable())
         {
-            const float pageWidth = std::min(avail.x, 980.0f);
+            const float configuredWidth = editorSettings.pageWidth > 0
+                                              ? static_cast<float>(editorSettings.pageWidth)
+                                              : avail.x;
+            const float pageWidth = std::min(avail.x, configuredWidth);
             const float pageOffset = std::max(0.0f, (avail.x - pageWidth) * 0.5f);
             const float pageHeight = std::max(1.0f, avail.y - 52.0f);
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pageOffset);
@@ -515,7 +522,10 @@ namespace Software::Modes::Slate
         bool inFrontmatter = !lines.empty() && Software::Slate::PathUtils::Trim(lines.front()) == "---";
         bool checkingFrontmatter = inFrontmatter;
 
-        const float pageWidth = std::min(ImGui::GetContentRegionAvail().x, 980.0f);
+        const float configuredWidth = WorkspaceContext(context).CurrentEditorSettings().pageWidth > 0
+                                          ? static_cast<float>(WorkspaceContext(context).CurrentEditorSettings().pageWidth)
+                                          : ImGui::GetContentRegionAvail().x;
+        const float pageWidth = std::min(ImGui::GetContentRegionAvail().x, configuredWidth);
         const float pageStartX = std::max(0.0f, (ImGui::GetContentRegionAvail().x - pageWidth) * 0.5f);
         for (std::size_t i = 0; i < lines.size(); ++i)
         {

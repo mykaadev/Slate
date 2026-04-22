@@ -11,6 +11,7 @@ namespace Software::Slate
 
         m_themeSettings = ThemeService::DefaultSettings();
         m_theme.Apply(m_themeSettings);
+        m_editorSettings = EditorSettingsService::DefaultSettings();
 
         std::string error;
         if (!m_workspaceRegistry.Load(&error))
@@ -161,6 +162,22 @@ namespace Software::Slate
         return m_theme.Save(m_themeSettings, error);
     }
 
+    const EditorSettings& SlateWorkspaceContext::CurrentEditorSettings() const
+    {
+        return m_editorSettings;
+    }
+
+    void SlateWorkspaceContext::SetEditorSettings(const EditorSettings& settings)
+    {
+        m_editorSettings = EditorSettingsService::Sanitize(settings);
+    }
+
+    bool SlateWorkspaceContext::SaveEditorSettings(std::string* error)
+    {
+        m_editorSettings = EditorSettingsService::Sanitize(m_editorSettings);
+        return m_editorSettingsService.Save(m_editorSettings, error);
+    }
+
     bool SlateWorkspaceContext::OpenWorkspace(const fs::path& root, std::string* error)
     {
         m_documents.Close();
@@ -173,6 +190,7 @@ namespace Software::Slate
         m_documents.SetWorkspaceRoot(m_workspace.Root());
         m_assets.SetWorkspaceRoot(m_workspace.Root());
         m_theme.SetWorkspaceRoot(m_workspace.Root());
+        m_editorSettingsService.SetWorkspaceRoot(m_workspace.Root());
 
         m_search.Rebuild(m_workspace);
         m_lastScanSeconds = 0.0;
@@ -186,6 +204,13 @@ namespace Software::Slate
             SetBackgroundError(themeError);
         }
         m_theme.Apply(m_themeSettings);
+
+        m_editorSettings = EditorSettingsService::DefaultSettings();
+        std::string editorError;
+        if (!m_editorSettingsService.Load(&m_editorSettings, &editorError))
+        {
+            SetBackgroundError(editorError);
+        }
 
         return true;
     }
