@@ -195,6 +195,15 @@ namespace Software::Platform
         return m_window == nullptr || glfwWindowShouldClose(m_window);
     }
 
+    void* PlatformLayer::NativeWindowHandle() const
+    {
+#if defined(_WIN32)
+        return m_window ? static_cast<void*>(glfwGetWin32Window(m_window)) : nullptr;
+#else
+        return nullptr;
+#endif
+    }
+
     void PlatformLayer::SetInputRouter(Software::Core::Runtime::InputRouter* router)
     {
         m_router = router;

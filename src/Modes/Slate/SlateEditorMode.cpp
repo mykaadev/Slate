@@ -60,6 +60,21 @@ namespace Software::Modes::Slate
         return Software::Slate::ModeIds::Editor;
     }
 
+    bool SlateEditorMode::WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const
+    {
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        const auto& ui = UiState(mutableContext);
+        const auto& workspace = WorkspaceContext(mutableContext);
+        return EditorContext(mutableContext).NativeEditorAvailable() &&
+               workspace.HasWorkspaceLoaded() &&
+               workspace.Documents().HasOpenDocument() &&
+               ui.editorView == Software::Slate::SlateEditorView::Document &&
+               !HelpOpen() &&
+               !SearchOpen() &&
+               !PromptOpen() &&
+               !ConfirmOpen();
+    }
+
     void SlateEditorMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
     {
         auto& workspace = WorkspaceContext(context);
@@ -93,6 +108,24 @@ namespace Software::Modes::Slate
             SetError(dropError);
         }
 
+        const auto pasteClipboardImage = [&]() {
+            Software::Slate::fs::path assetRelative;
+            std::string error;
+            if (workspace.Assets().SaveClipboardImageAsset(document->relativePath, &assetRelative, &error))
+            {
+                editor.InsertTextAtCursor(workspace.Documents(),
+                                          Software::Slate::AssetService::MarkdownImageLink(document->relativePath,
+                                                                                           assetRelative) +
+                                              document->lineEnding,
+                                          context.frame.elapsedSeconds);
+                SetStatus("pasted image");
+                return true;
+            }
+
+            SetError(error);
+            return false;
+        };
+
         if (handleInput)
         {
             if (ui.editorView == Software::Slate::SlateEditorView::Outline)
@@ -122,27 +155,32 @@ namespace Software::Modes::Slate
             }
             else
             {
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Save))
+                {
+                    SaveActiveDocument(context);
+                }
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Find) &&
+                    workspace.Documents().HasOpenDocument())
+                {
+                    BeginSearchOverlay(true, context, SearchOverlayScope::Document);
+                }
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::PasteClipboardImage) &&
+                    workspace.Documents().HasOpenDocument())
+                {
+                    pasteClipboardImage();
+                }
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Escape))
+                {
+                    editor.ReleaseNativeEditorFocus();
+                }
+
                 if (IsCtrlPressed(ImGuiKey_F) && workspace.Documents().HasOpenDocument())
                 {
                     BeginSearchOverlay(true, context, SearchOverlayScope::Document);
                 }
                 else if (IsCtrlPressed(ImGuiKey_V) && workspace.Assets().HasClipboardImage() && workspace.Documents().HasOpenDocument())
                 {
-                    Software::Slate::fs::path assetRelative;
-                    std::string error;
-                    if (workspace.Assets().SaveClipboardImageAsset(document->relativePath, &assetRelative, &error))
-                    {
-                        editor.InsertTextAtCursor(workspace.Documents(),
-                                                  Software::Slate::AssetService::MarkdownImageLink(document->relativePath,
-                                                                                                   assetRelative) +
-                                                      document->lineEnding,
-                                                  context.frame.elapsedSeconds);
-                        SetStatus("pasted image");
-                    }
-                    else
-                    {
-                        SetError(error);
-                    }
+                    pasteClipboardImage();
                 }
                 else if (editor.IsTextFocused())
                 {
@@ -207,6 +245,35 @@ namespace Software::Modes::Slate
         }
 
         const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if (editor.NativeEditorAvailable())
+        {
+            const float pageWidth = std::min(avail.x, 980.0f);
+            const float pageOffset = std::max(0.0f, (avail.x - pageWidth) * 0.5f);
+            const float pageHeight = std::max(1.0f, avail.y - 52.0f);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pageOffset);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, Background);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::BeginChild("NativeMarkdownEditorPage", ImVec2(pageWidth, pageHeight), false,
+                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            const ImVec2 editorPos = ImGui::GetWindowPos();
+            const ImVec2 editorSize = ImGui::GetWindowSize();
+            ImGui::EndChild();
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor();
+
+            if (editor.NativeEditorVisible())
+            {
+                editor.RenderNativeEditor(document,
+                                          WorkspaceContext(context).Documents(),
+                                          context.frame.elapsedSeconds,
+                                          editorPos.x,
+                                          editorPos.y,
+                                          editorSize.x,
+                                          editorSize.y);
+            }
+            return;
+        }
+
         ImGui::BeginChild("LiveMarkdownEditorPage", ImVec2(0.0f, avail.y - 52.0f), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
         DrawLiveMarkdownEditor(context, document);

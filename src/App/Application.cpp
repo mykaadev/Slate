@@ -15,6 +15,7 @@
 #include "Core/Runtime/ServiceLocator.h"
 #include "Core/Runtime/ToolRegistry.h"
 #include "Platform/PlatformLayer.h"
+#include "Platform/PlatformWindowService.h"
 
 namespace Software::Core::App
 {
@@ -40,6 +41,8 @@ namespace Software::Core::App
         });
 
         Software::Core::Runtime::AppContext context{services, tools, features, events, {}, false, &droppedFiles};
+        services.Register<Software::Platform::PlatformWindowService>(
+            std::make_shared<Software::Platform::PlatformWindowService>(platform.NativeWindowHandle()));
         Software::App::DefaultModules::Register(context);
 
         double previousTime = glfwGetTime();

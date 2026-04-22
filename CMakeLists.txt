@@ -68,6 +68,74 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+if(WIN32)
+    FetchContent_Declare(
+        scintilla_src
+        URL https://www.scintilla.org/scintilla561.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(scintilla_src)
+
+    FetchContent_Declare(
+        lexilla_src
+        URL https://www.scintilla.org/lexilla546.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(lexilla_src)
+
+    set(SCINTILLA_ROOT "${scintilla_src_SOURCE_DIR}")
+    if(EXISTS "${scintilla_src_SOURCE_DIR}/scintilla")
+        set(SCINTILLA_ROOT "${scintilla_src_SOURCE_DIR}/scintilla")
+    endif()
+
+    set(LEXILLA_ROOT "${lexilla_src_SOURCE_DIR}")
+    if(EXISTS "${lexilla_src_SOURCE_DIR}/lexilla")
+        set(LEXILLA_ROOT "${lexilla_src_SOURCE_DIR}/lexilla")
+    endif()
+
+    file(GLOB SCINTILLA_CORE_SOURCES CONFIGURE_DEPENDS
+        "${SCINTILLA_ROOT}/src/*.cxx"
+    )
+    list(APPEND SCINTILLA_CORE_SOURCES
+        "${SCINTILLA_ROOT}/win32/HanjaDic.cxx"
+        "${SCINTILLA_ROOT}/win32/ListBox.cxx"
+        "${SCINTILLA_ROOT}/win32/PlatWin.cxx"
+        "${SCINTILLA_ROOT}/win32/ScintillaWin.cxx"
+        "${SCINTILLA_ROOT}/win32/SurfaceD2D.cxx"
+        "${SCINTILLA_ROOT}/win32/SurfaceGDI.cxx"
+    )
+
+    add_library(ScintillaCore STATIC ${SCINTILLA_CORE_SOURCES})
+    target_include_directories(ScintillaCore PUBLIC
+        "${SCINTILLA_ROOT}/include"
+        "${SCINTILLA_ROOT}/src"
+        "${SCINTILLA_ROOT}/win32"
+    )
+    target_compile_definitions(ScintillaCore PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(ScintillaCore PUBLIC
+        user32
+        gdi32
+        imm32
+        ole32
+        oleaut32
+        advapi32
+    )
+
+    file(GLOB LEXILLA_SUPPORT_SOURCES CONFIGURE_DEPENDS
+        "${LEXILLA_ROOT}/lexlib/*.cxx"
+    )
+    add_library(SlateMarkdownLexer STATIC
+        ${LEXILLA_SUPPORT_SOURCES}
+        "${LEXILLA_ROOT}/lexers/LexMarkdown.cxx"
+    )
+    target_include_directories(SlateMarkdownLexer PUBLIC
+        "${LEXILLA_ROOT}/include"
+        "${LEXILLA_ROOT}/lexlib"
+        "${SCINTILLA_ROOT}/include"
+    )
+    target_compile_definitions(SlateMarkdownLexer PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE=1)
+endif()
+
 # -------------------------
 # OpenGL (Rendering)
 # -------------------------
@@ -161,6 +229,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     SoftwareFramework
 )
 
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        ScintillaCore
+        SlateMarkdownLexer
+    )
+endif()
+
 # ========================================================================
 # Tests
 # ========================================================================
@@ -182,6 +257,13 @@ target_include_directories(SlateCoreTests PRIVATE
 )
 
 add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)
+
+if(WIN32)
+    target_link_libraries(SlateCoreTests PRIVATE
+        ScintillaCore
+        SlateMarkdownLexer
+    )
+endif()
 
 # ========================================================================
 # Platform-Specific Linking

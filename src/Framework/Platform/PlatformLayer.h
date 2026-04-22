@@ -34,6 +34,9 @@ namespace Software::Platform
         /** Indicates whether the platform window should close. */
         bool ShouldClose() const;
 
+        /** Returns the native platform window handle when available. */
+        void* NativeWindowHandle() const;
+
         /** Assigns the input router used to dispatch events. */
         void SetInputRouter(Software::Core::Runtime::InputRouter* router);
 

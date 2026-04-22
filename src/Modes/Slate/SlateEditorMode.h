@@ -12,6 +12,7 @@ namespace Software::Modes::Slate
         const char* ModeName() const override;
         void DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput) override;
         std::string ModeHelperText(const Software::Core::Runtime::AppContext& context) const override;
+        bool WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const override;
 
         void DrawEditor(Software::Core::Runtime::AppContext& context,
                         Software::Slate::DocumentService::Document& document);

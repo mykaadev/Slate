@@ -1,11 +1,18 @@
 #include "App/Slate/SlateEditorContext.h"
 
 #include "App/Slate/AssetService.h"
+#include "App/Slate/ScintillaEditorHost.h"
 
 #include <functional>
 
 namespace Software::Slate
 {
+    SlateEditorContext::SlateEditorContext() : m_nativeEditor(std::make_unique<ScintillaEditorHost>())
+    {
+    }
+
+    SlateEditorContext::~SlateEditorContext() = default;
+
     MarkdownService& SlateEditorContext::Markdown()
     {
         return m_markdown;
@@ -38,12 +45,29 @@ namespace Software::Slate
 
     bool SlateEditorContext::IsTextFocused() const
     {
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            return m_nativeEditor->IsFocused();
+        }
         return m_textFocused;
     }
 
     void SlateEditorContext::SetTextFocused(bool focused)
     {
         m_textFocused = focused;
+        if (!m_nativeEditor || !m_nativeEditor->Available())
+        {
+            return;
+        }
+
+        if (focused)
+        {
+            m_nativeEditor->Focus();
+        }
+        else
+        {
+            m_nativeEditor->ReleaseFocus();
+        }
     }
 
     void SlateEditorContext::LoadFromActiveDocument(const DocumentService& documents)
@@ -51,6 +75,11 @@ namespace Software::Slate
         if (const auto* document = documents.Active())
         {
             m_editor.Load(document->text, document->lineEnding);
+            if (m_nativeEditor)
+            {
+                m_nativeEditor->LoadDocument(document, true);
+                m_nativeEditor->Focus();
+            }
             m_textFocused = true;
         }
         InvalidateJournalSummary();
@@ -59,6 +88,11 @@ namespace Software::Slate
     void SlateEditorContext::Clear()
     {
         m_editor.Load("", "\n");
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->Clear();
+            m_nativeEditor->SetVisible(false);
+        }
         m_textFocused = false;
         InvalidateJournalSummary();
     }
@@ -69,6 +103,11 @@ namespace Software::Slate
         if (!document)
         {
             return false;
+        }
+
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            return m_nativeEditor->SyncDocument(documents, elapsedSeconds);
         }
 
         std::string text;
@@ -90,6 +129,10 @@ namespace Software::Slate
             return;
         }
 
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            m_nativeEditor->JumpToLine(line);
+        }
         m_editor.SetActiveLine(line - 1, 0);
         m_textFocused = true;
     }
@@ -103,6 +146,15 @@ namespace Software::Slate
         }
 
         m_editor.EnsureLoaded(document->text, document->lineEnding);
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            if (m_nativeEditor->InsertTextAtCursor(text))
+            {
+                CommitToActiveDocument(documents, elapsedSeconds);
+            }
+            return;
+        }
+
         if (m_editor.InsertTextAtCursor(text))
         {
             CommitToActiveDocument(documents, elapsedSeconds);
@@ -206,5 +258,71 @@ namespace Software::Slate
             *error = std::move(lastError);
         }
         return inserted;
+    }
+
+    void SlateEditorContext::AttachToNativeWindow(void* nativeHandle)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->AttachToParentWindow(nativeHandle);
+        }
+    }
+
+    bool SlateEditorContext::NativeEditorAvailable() const
+    {
+        return m_nativeEditor && m_nativeEditor->Available();
+    }
+
+    bool SlateEditorContext::NativeEditorVisible() const
+    {
+        return m_nativeEditor && m_nativeEditor->Visible();
+    }
+
+    void SlateEditorContext::SetNativeEditorVisible(bool visible)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->SetVisible(visible);
+        }
+    }
+
+    void SlateEditorContext::RenderNativeEditor(const DocumentService::Document& document,
+                                                DocumentService& documents,
+                                                double elapsedSeconds,
+                                                float screenX,
+                                                float screenY,
+                                                float width,
+                                                float height)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->Render(document, documents, elapsedSeconds, screenX, screenY, width, height);
+            if (m_textFocused && m_nativeEditor->Visible() && !m_nativeEditor->IsFocused())
+            {
+                m_nativeEditor->Focus();
+            }
+        }
+    }
+
+    void SlateEditorContext::NotifyDocumentSaved()
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->MarkSaved();
+        }
+    }
+
+    bool SlateEditorContext::ConsumeNativeCommand(NativeEditorCommand command)
+    {
+        return m_nativeEditor && m_nativeEditor->ConsumeCommand(command);
+    }
+
+    void SlateEditorContext::ReleaseNativeEditorFocus()
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->ReleaseFocus();
+        }
+        m_textFocused = false;
     }
 }

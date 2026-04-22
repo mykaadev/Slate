@@ -19,7 +19,7 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::OnExit(Software::Core::Runtime::AppContext& context)
     {
-        (void)context;
+        EditorContext(context).SetNativeEditorVisible(false);
         m_prompt = {};
         m_confirm = {};
         m_searchOverlayOpen = false;
@@ -38,6 +38,7 @@ namespace Software::Modes::Slate
         }
 
         HandleGlobalKeys(context);
+        EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context));
 
         DrawRootBegin();
 
@@ -68,6 +69,12 @@ namespace Software::Modes::Slate
         ImGui::End();
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(5);
+    }
+
+    bool SlateModeBase::WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const
+    {
+        (void)context;
+        return false;
     }
 
     void SlateModeBase::DrawHelp() const
@@ -207,6 +214,7 @@ namespace Software::Modes::Slate
         std::string error;
         if (workspace.SaveDocument(&error))
         {
+            editor.NotifyDocumentSaved();
             SetStatus("saved");
             return true;
         }
