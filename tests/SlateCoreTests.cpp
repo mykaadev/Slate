@@ -1,19 +1,20 @@
-#include "App/Slate/AssetService.h"
-#include "App/Slate/DocumentService.h"
-#include "App/Slate/EditorSettingsService.h"
-#include "App/Slate/EditorDocumentViewModel.h"
-#include "App/Slate/JournalService.h"
-#include "App/Slate/LinkService.h"
-#include "App/Slate/MarkdownService.h"
-#include "App/Slate/NavigationController.h"
-#include "App/Slate/SearchService.h"
-#include "App/Slate/ThemeService.h"
+#include "App/Slate/Documents/AssetService.h"
+#include "App/Slate/Documents/DocumentService.h"
+#include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Editor/EditorDocumentViewModel.h"
+#include "App/Slate/Markdown/JournalService.h"
+#include "App/Slate/Documents/LinkService.h"
+#include "App/Slate/Markdown/MarkdownService.h"
+#include "App/Slate/Core/NavigationController.h"
+#include "App/Slate/Workspace/SearchService.h"
+#include "App/Slate/Workspace/ThemeService.h"
 #include "App/Slate/UI/SlateUi.h"
-#include "App/Slate/WorkspaceService.h"
-#include "App/Slate/WorkspaceRegistryService.h"
-#include "App/Slate/WorkspaceTree.h"
+#include "App/Slate/Workspace/WorkspaceService.h"
+#include "App/Slate/Workspace/WorkspaceRegistryService.h"
+#include "App/Slate/Workspace/WorkspaceTree.h"
 
 #include <chrono>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -428,6 +429,74 @@ namespace
         CHECK(sawUnderlineSource);
     }
 
+    void TestMarkdownTagsAndTodos()
+    {
+        Software::Slate::MarkdownService markdown;
+
+        const auto tagsOnly = markdown.Parse("# Heading #ignored\nplain #alpha\n```md\n#beta\n#todo - [Open] - hidden\n```\n");
+        CHECK(tagsOnly.tags.size() == 1);
+        CHECK(tagsOnly.tags.front().name == "alpha");
+
+        const std::string todoText =
+            "before\n"
+            "#todo - [Research] - Ship compact todos #ux\n"
+            "  Keep title and description tidy #compact\n"
+            "after\n";
+        const auto summary = markdown.Parse(todoText);
+        CHECK(summary.todos.size() == 1);
+        const auto& todo = summary.todos.front();
+        CHECK(todo.line == 2);
+        CHECK(todo.endLine == 3);
+        CHECK(todo.state == Software::Slate::TodoState::Research);
+        CHECK(!todo.done);
+        CHECK(todo.title == "Ship compact todos #ux");
+        CHECK(todo.description == "Keep title and description tidy #compact");
+        CHECK(std::find(todo.tags.begin(), todo.tags.end(), "todo") != todo.tags.end());
+        CHECK(std::find(todo.tags.begin(), todo.tags.end(), "ux") != todo.tags.end());
+        CHECK(std::find(todo.tags.begin(), todo.tags.end(), "compact") != todo.tags.end());
+
+        const auto legacy = markdown.Parse("- [x] #todo [Done] Legacy ticket\n  Wrapped\n");
+        CHECK(legacy.todos.size() == 1);
+        CHECK(legacy.todos.front().state == Software::Slate::TodoState::Done);
+        CHECK(legacy.todos.front().done);
+    }
+
+    void TestTodoBlockFormattingAndReplacement()
+    {
+        const std::string text =
+            "Intro\r\n"
+            "#todo - [Open] - Ship compact todos #ux\r\n"
+            "  Keep it tidy\r\n"
+            "After\r\n";
+        Software::Slate::MarkdownService markdown;
+        const auto summary = markdown.Parse(text);
+        CHECK(summary.todos.size() == 1);
+
+        std::string updated;
+        CHECK(Software::Slate::MarkdownService::ReplaceTodoTicketBlock(text,
+                                                                       summary.todos.front(),
+                                                                       Software::Slate::TodoState::Done,
+                                                                       "Ship compact todos #ux",
+                                                                       "Wrapped up",
+                                                                       &updated));
+        CHECK(updated ==
+              "Intro\r\n"
+              "#todo - [Done] - Ship compact todos #ux\r\n"
+              "  Wrapped up\r\n"
+              "After\r\n");
+    }
+
+    void TestEditorDocumentReplaceActiveLineWithText()
+    {
+        Software::Slate::EditorDocumentViewModel editor;
+        editor.Load("first\n/todo\nlast", "\n");
+        editor.SetActiveLine(1, 5);
+        CHECK(editor.ReplaceActiveLineWithText("#todo - [Open] - Title\n  Description"));
+        CHECK(editor.ActiveLine() == 2);
+        CHECK(editor.ActiveLineText() == "  Description");
+        CHECK(editor.ToText() == "first\n#todo - [Open] - Title\n  Description\nlast");
+    }
+
     void TestWorkspaceRegistry()
     {
         const fs::path root = MakeTempWorkspace();
@@ -584,6 +653,9 @@ int main()
     TestEditorDocumentViewModel();
     TestEditorSingleCharacterDeletionDoesNotMergeLines();
     TestMarkdownInlineSpans();
+    TestMarkdownTagsAndTodos();
+    TestTodoBlockFormattingAndReplacement();
+    TestEditorDocumentReplaceActiveLineWithText();
     TestWorkspaceRegistry();
     TestThemeServiceRoundTrip();
     TestThemeServiceApply();

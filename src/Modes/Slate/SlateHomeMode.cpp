@@ -1,7 +1,7 @@
 #include "Modes/Slate/SlateHomeMode.h"
 
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -34,31 +34,23 @@ namespace Software::Modes::Slate
             {
                 BeginNewNoteFlow(context);
             }
-            else if (IsKeyPressed(ImGuiKey_O))
-            {
-                ShowBrowser(Software::Slate::SlateBrowserView::QuickOpen, context);
-            }
             else if (IsKeyPressed(ImGuiKey_S))
             {
                 BeginSearchOverlay(true, context);
             }
-            else if (IsKeyPressed(ImGuiKey_R))
-            {
-                ShowBrowser(Software::Slate::SlateBrowserView::Recent, context);
-            }
             else if (IsKeyPressed(ImGuiKey_F))
             {
                 ShowBrowser(Software::Slate::SlateBrowserView::FileTree, context);
-            }
-            else if (IsKeyPressed(ImGuiKey_L))
-            {
-                ShowBrowser(Software::Slate::SlateBrowserView::Library, context);
             }
             else if (IsKeyPressed(ImGuiKey_W))
             {
                 ShowWorkspaceSwitcher(context);
             }
             else if (IsKeyPressed(ImGuiKey_T))
+            {
+                ShowTodos(context);
+            }
+            else if (IsKeyPressed(ImGuiKey_C))
             {
                 ShowSettings(context);
             }
@@ -80,6 +72,7 @@ namespace Software::Modes::Slate
         {
             TextCentered(workspace.Workspace().Root().filename().string().c_str(), Muted);
         }
+
         ImGui::Spacing();
         TextCentered("quiet markdown workspace", Primary);
 
@@ -87,25 +80,34 @@ namespace Software::Modes::Slate
         const float columnWidth = 360.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - columnWidth) * 0.5f);
         ImGui::BeginGroup();
-        auto section = [](const char* title) {
+        auto section = [](const char* title, const ImVec4& color) {
             ImGui::Dummy(ImVec2(1.0f, 8.0f));
-            ImGui::TextColored(Muted, "%s", title);
+            ImGui::TextColored(color, "%s", title);
         };
-        section("write");
-        TextLine("j", "journal");
-        TextLine("n", "new");
-        section("browse");
-        TextLine("l", "library");
-        TextLine("f", "files");
-        TextLine("r", "recent");
-        section("find");
-        TextLine("s", "search");
-        TextLine("o", "open");
-        section("system");
-        TextLine("w", "workspaces");
-        TextLine("t", "theme");
-        TextLine("?", "help");
-        TextLine("q", "quit");
+        auto action = [](const char* key, const char* label, const ImVec4& color) {
+            ImGui::TextColored(color, "(%s)", key);
+            ImGui::SameLine();
+            ImGui::TextColored(Primary, "%s", label);
+        };
+        const ImVec4 systemColor{0.66f, 0.66f, 0.60f, 1.0f};
+
+        section("write", Green);
+        action("j", "journal", Green);
+        action("n", "new", Green);
+        action("t", "todos", Green);
+
+        section("find", Cyan);
+        action("s", "search", Cyan);
+
+        section("browse", Amber);
+        action("f", "files", Amber);
+
+        section("system", systemColor);
+        action("w", "workspaces", systemColor);
+        action("c", "config", systemColor);
+        action("?", "help", systemColor);
+        action("q", "quit", systemColor);
+
         ImGui::EndGroup();
 
         ImGui::Dummy(ImVec2(1.0f, 24.0f));
@@ -116,6 +118,6 @@ namespace Software::Modes::Slate
     std::string SlateHomeMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
         (void)context;
-        return "(j) journal   (n) new   (l) library   (o) open   (?) help";
+        return "(j) journal   (n) new   (s) search   (f) files   (t) todos   (c) config   (?) help";
     }
 }

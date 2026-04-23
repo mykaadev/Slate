@@ -1,21 +1,248 @@
 #include "Modes/Slate/SlateModeBase.h"
 
-#include "App/Slate/PathUtils.h"
-#include "App/Slate/SlateEditorContext.h"
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateUiState.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Editor/SlateEditorContext.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateUiState.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "Core/Runtime/ToolRegistry.h"
 #include "imgui.h"
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 #include <utility>
 
 namespace Software::Modes::Slate
 {
     using namespace Software::Slate::UI;
+
+    namespace
+    {
+        const char* WorkspaceSearchModeLabel(Software::Slate::SearchMode mode)
+        {
+            switch (mode)
+            {
+            case Software::Slate::SearchMode::FileNames:
+                return "docs";
+            case Software::Slate::SearchMode::FullText:
+                return "text";
+            case Software::Slate::SearchMode::Recent:
+                return "recent";
+            }
+            return "docs";
+        }
+
+        const ImVec4& WorkspaceSearchModeColor(Software::Slate::SearchMode mode)
+        {
+            switch (mode)
+            {
+            case Software::Slate::SearchMode::FileNames:
+                return Cyan;
+            case Software::Slate::SearchMode::FullText:
+                return Amber;
+            case Software::Slate::SearchMode::Recent:
+                return Green;
+            }
+            return Cyan;
+        }
+
+        const char* WorkspaceSearchModeHint(Software::Slate::SearchMode mode)
+        {
+            switch (mode)
+            {
+            case Software::Slate::SearchMode::FileNames:
+                return "type to search docs. Tab cycles docs / text / recent";
+            case Software::Slate::SearchMode::FullText:
+                return "type to search note text. Tab cycles docs / text / recent";
+            case Software::Slate::SearchMode::Recent:
+                return "recent files. Type to filter. Tab cycles docs / text / recent";
+            }
+            return "type to search";
+        }
+
+        Software::Slate::SearchMode NextWorkspaceSearchMode(Software::Slate::SearchMode mode)
+        {
+            switch (mode)
+            {
+            case Software::Slate::SearchMode::FileNames:
+                return Software::Slate::SearchMode::FullText;
+            case Software::Slate::SearchMode::FullText:
+                return Software::Slate::SearchMode::Recent;
+            case Software::Slate::SearchMode::Recent:
+                return Software::Slate::SearchMode::FileNames;
+            }
+            return Software::Slate::SearchMode::FileNames;
+        }
+
+        std::vector<Software::Slate::SearchResult> QueryRecentFiles(const Software::Slate::SlateWorkspaceContext& workspace,
+                                                                    const std::string& query,
+                                                                    std::size_t limit)
+        {
+            std::vector<Software::Slate::SearchResult> results;
+            for (const auto& recent : workspace.Workspace().RecentFiles())
+            {
+                if (!query.empty() && !ContainsFilter(recent.generic_string(), query.c_str()))
+                {
+                    continue;
+                }
+
+                Software::Slate::SearchResult result;
+                result.relativePath = recent;
+                result.path = recent;
+                result.line = 1;
+                result.column = 1;
+                result.snippet = "recent";
+                result.score = static_cast<int>(limit - std::min(limit, results.size()));
+                results.push_back(std::move(result));
+                if (results.size() >= limit)
+                {
+                    break;
+                }
+            }
+            return results;
+        }
+
+        std::string NextSearchModeHelper(Software::Slate::SearchMode mode)
+        {
+            std::string helper = "(tab) ";
+            helper += WorkspaceSearchModeLabel(NextWorkspaceSearchMode(mode));
+            helper += "   (up/down) move   (enter) open   (esc) close";
+            return helper;
+        }
+
+        constexpr std::array<const char*, 5> TodoFilterLabels{{"all", "open", "research", "doing", "done"}};
+
+        const char* TodoFilterLabel(int filter)
+        {
+            const int index = std::clamp(filter, 0, static_cast<int>(TodoFilterLabels.size() - 1));
+            return TodoFilterLabels[static_cast<std::size_t>(index)];
+        }
+
+        int TodoStateSortKey(Software::Slate::TodoState state)
+        {
+            switch (state)
+            {
+            case Software::Slate::TodoState::Open:
+                return 0;
+            case Software::Slate::TodoState::Research:
+                return 1;
+            case Software::Slate::TodoState::Doing:
+                return 2;
+            case Software::Slate::TodoState::Done:
+                return 3;
+            }
+            return 0;
+        }
+
+        const ImVec4& TodoFilterColor(int filter)
+        {
+            switch (std::clamp(filter, 0, 4))
+            {
+            case 1:
+                return TodoStateColor(Software::Slate::TodoState::Open);
+            case 2:
+                return TodoStateColor(Software::Slate::TodoState::Research);
+            case 3:
+                return TodoStateColor(Software::Slate::TodoState::Doing);
+            case 4:
+                return TodoStateColor(Software::Slate::TodoState::Done);
+            default:
+                return Primary;
+            }
+        }
+
+        bool MatchesTodoFilter(const Software::Slate::TodoTicket& todo, int filter)
+        {
+            switch (std::clamp(filter, 0, 4))
+            {
+            case 1:
+                return todo.state == Software::Slate::TodoState::Open;
+            case 2:
+                return todo.state == Software::Slate::TodoState::Research;
+            case 3:
+                return todo.state == Software::Slate::TodoState::Doing;
+            case 4:
+                return todo.state == Software::Slate::TodoState::Done;
+            default:
+                return true;
+            }
+        }
+
+        bool TodoMatchesQuery(const Software::Slate::TodoTicket& todo, const std::string& query)
+        {
+            if (query.empty())
+            {
+                return true;
+            }
+
+            if (ContainsFilter(todo.title, query.c_str()) ||
+                ContainsFilter(todo.description, query.c_str()) ||
+                ContainsFilter(todo.relativePath.generic_string(), query.c_str()) ||
+                ContainsFilter(Software::Slate::MarkdownService::TodoStateLabel(todo.state), query.c_str()))
+            {
+                return true;
+            }
+
+            for (const auto& tag : todo.tags)
+            {
+                const std::string needle = "#" + tag;
+                if (ContainsFilter(needle, query.c_str()) || ContainsFilter(tag, query.c_str()))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        std::vector<Software::Slate::TodoTicket> CollectTodos(const Software::Slate::SlateWorkspaceContext& workspace)
+        {
+            std::vector<Software::Slate::TodoTicket> todos;
+            Software::Slate::MarkdownService markdown;
+            const auto* activeDocument = workspace.Documents().Active();
+            const auto activePath = activeDocument ? Software::Slate::PathUtils::NormalizeRelative(activeDocument->relativePath)
+                                                   : Software::Slate::fs::path{};
+            for (const auto& relativePath : workspace.Workspace().MarkdownFiles())
+            {
+                std::string text;
+                const auto normalized = Software::Slate::PathUtils::NormalizeRelative(relativePath);
+                if (activeDocument && normalized == activePath)
+                {
+                    text = activeDocument->text;
+                }
+                else if (!Software::Slate::DocumentService::ReadTextFile(workspace.Workspace().Resolve(relativePath),
+                                                                         &text,
+                                                                         nullptr))
+                {
+                    continue;
+                }
+
+                auto summary = markdown.Parse(text);
+                for (auto& todo : summary.todos)
+                {
+                    todo.relativePath = relativePath;
+                    todos.push_back(std::move(todo));
+                }
+            }
+
+            std::sort(todos.begin(), todos.end(), [](const auto& left, const auto& right) {
+                const int leftState = TodoStateSortKey(left.state);
+                const int rightState = TodoStateSortKey(right.state);
+                if (leftState != rightState)
+                {
+                    return leftState < rightState;
+                }
+                if (left.relativePath != right.relativePath)
+                {
+                    return left.relativePath.generic_string() < right.relativePath.generic_string();
+                }
+                return left.line < right.line;
+            });
+            return todos;
+        }
+    }
 
     void SlateModeBase::OnExit(Software::Core::Runtime::AppContext& context)
     {
@@ -23,7 +250,11 @@ namespace Software::Modes::Slate
         m_prompt = {};
         m_confirm = {};
         m_searchOverlayOpen = false;
+        m_workspaceOverlayOpen = false;
+        m_todoOverlayOpen = false;
+        m_todoForm = {};
         m_searchNavigation.Reset();
+        m_todoNavigation.Reset();
         m_helpOpen = false;
     }
 
@@ -38,11 +269,14 @@ namespace Software::Modes::Slate
         }
 
         HandleGlobalKeys(context);
-        EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context));
+        const bool overlayOpen =
+            m_helpOpen || m_prompt.open || m_confirm.open || m_searchOverlayOpen || m_workspaceOverlayOpen ||
+            m_todoOverlayOpen || m_todoForm.open;
+        EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context) && !overlayOpen);
 
         DrawRootBegin(context);
 
-        const bool handleInput = !m_helpOpen && !m_prompt.open && !m_confirm.open && !m_searchOverlayOpen;
+        const bool handleInput = !overlayOpen;
         if (m_helpOpen)
         {
             DrawHelp();
@@ -55,6 +289,18 @@ namespace Software::Modes::Slate
         if (m_searchOverlayOpen)
         {
             DrawSearchOverlay(context);
+        }
+        if (m_workspaceOverlayOpen)
+        {
+            DrawWorkspaceOverlay(context);
+        }
+        if (m_todoOverlayOpen)
+        {
+            DrawTodoOverlay(context);
+        }
+        if (m_todoForm.open)
+        {
+            DrawTodoFormOverlay(context);
         }
         if (m_prompt.open)
         {
@@ -89,8 +335,9 @@ namespace Software::Modes::Slate
         TextLine("^s", "save");
         TextLine("j", "journal");
         TextLine("n", "new");
-        TextLine("l", "library");
-        TextLine("t", "theme");
+        TextLine("f", "files");
+        TextLine("t", "todos");
+        TextLine("c", "config");
         TextLine("a", "folder");
         TextLine("w", "workspaces");
         TextLine("m", "move");
@@ -481,11 +728,29 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::ShowWorkspaceSwitcher(Software::Core::Runtime::AppContext& context)
     {
+        if (!WorkspaceContext(context).HasWorkspaceLoaded())
+        {
+            ShowWorkspaceSetup(context);
+            return;
+        }
+
         auto& ui = UiState(context);
-        ui.workspaceView = Software::Slate::SlateWorkspaceView::Switcher;
-        ui.workspaceNavigation.SetCount(WorkspaceContext(context).WorkspaceRegistry().Vaults().size());
+        const auto& registry = WorkspaceContext(context).WorkspaceRegistry();
+        const auto& vaults = registry.Vaults();
+        ui.workspaceNavigation.SetCount(vaults.size());
         ui.workspaceNavigation.Reset();
-        ActivateMode(Software::Slate::ModeIds::Workspace, context);
+        if (const auto* activeVault = registry.ActiveVault())
+        {
+            for (std::size_t i = 0; i < vaults.size(); ++i)
+            {
+                if (vaults[i].id == activeVault->id)
+                {
+                    ui.workspaceNavigation.SetSelected(i);
+                    break;
+                }
+            }
+        }
+        m_workspaceOverlayOpen = true;
     }
 
     void SlateModeBase::ShowWorkspaceSetup(Software::Core::Runtime::AppContext& context)
@@ -507,6 +772,42 @@ namespace Software::Modes::Slate
         ui.navigation.SetCount(2);
         ui.navigation.Reset();
         ActivateMode(Software::Slate::ModeIds::Settings, context);
+    }
+
+    void SlateModeBase::ShowTodos(Software::Core::Runtime::AppContext& context)
+    {
+        if (!WorkspaceContext(context).HasWorkspaceLoaded())
+        {
+            ShowWorkspaceSetup(context);
+            return;
+        }
+
+        EditorContext(context).CommitToActiveDocument(WorkspaceContext(context).Documents(), m_nowSeconds);
+        EditorContext(context).ReleaseNativeEditorFocus();
+        m_todoOverlayOpen = true;
+        m_focusTodoSearch = true;
+        m_todoNavigation.Reset();
+    }
+
+    void SlateModeBase::BeginTodoCreate(Software::Core::Runtime::AppContext& context)
+    {
+        if (!WorkspaceContext(context).HasWorkspaceLoaded())
+        {
+            ShowWorkspaceSetup(context);
+            return;
+        }
+
+        EditorContext(context).CommitToActiveDocument(WorkspaceContext(context).Documents(), m_nowSeconds);
+        EditorContext(context).ReleaseNativeEditorFocus();
+        std::string activeLine;
+        const bool hasActiveLine = EditorContext(context).ActiveLineText(&activeLine);
+        m_todoForm = {};
+        m_todoForm.open = true;
+        m_todoForm.focusTitle = true;
+        m_todoForm.mode = TodoFormMode::Create;
+        m_todoForm.state = Software::Slate::TodoState::Open;
+        m_todoForm.replaceActiveLine = hasActiveLine && Software::Slate::PathUtils::Trim(activeLine) == "/todo";
+        m_todoForm.title = "Untitled todo";
     }
 
     void SlateModeBase::ShowHome(Software::Core::Runtime::AppContext& context)
@@ -558,13 +859,21 @@ namespace Software::Modes::Slate
         {
             ShowWorkspaceSwitcher(context);
         }
-        else if (trimmed == "t" || trimmed == "theme" || trimmed == "settings")
+        else if (trimmed == "todo" || trimmed == "todos")
+        {
+            ShowTodos(context);
+        }
+        else if (trimmed == "c" || trimmed == "config" || trimmed == "theme" || trimmed == "settings")
         {
             ShowSettings(context);
         }
-        else if (trimmed == "library" || trimmed == "l" || trimmed == "docs")
+        else if (trimmed == "files" || trimmed == "f" || trimmed == "tree" || trimmed == "library" || trimmed == "l")
         {
-            ShowBrowser(Software::Slate::SlateBrowserView::Library, context);
+            ShowBrowser(Software::Slate::SlateBrowserView::FileTree, context);
+        }
+        else if (trimmed == "search" || trimmed == "s" || trimmed == "docs")
+        {
+            BeginSearchOverlay(true, context);
         }
         else if (trimmed == "new workspace" || trimmed == "new vault")
         {
@@ -681,15 +990,15 @@ namespace Software::Modes::Slate
         }
         else
         {
-            m_visibleSearchResults = workspace.Search().Query(m_searchBuffer, m_searchMode, 100);
+            m_visibleSearchResults = m_searchMode == Software::Slate::SearchMode::Recent
+                                         ? QueryRecentFiles(workspace, m_searchBuffer, 100)
+                                         : workspace.Search().Query(m_searchBuffer, m_searchMode, 100);
         }
         m_searchNavigation.SetCount(m_visibleSearchResults.size());
 
         if (m_searchOverlayScope == SearchOverlayScope::Workspace && IsKeyPressed(ImGuiKey_Tab))
         {
-            m_searchMode = m_searchMode == Software::Slate::SearchMode::FileNames
-                               ? Software::Slate::SearchMode::FullText
-                               : Software::Slate::SearchMode::FileNames;
+            m_searchMode = NextWorkspaceSearchMode(m_searchMode);
             m_searchNavigation.Reset();
         }
         if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
@@ -731,8 +1040,7 @@ namespace Software::Modes::Slate
         if (!documentFind)
         {
             ImGui::SameLine();
-            ImGui::TextColored(Muted, "%s",
-                               m_searchMode == Software::Slate::SearchMode::FileNames ? "files" : "full text");
+            ImGui::TextColored(WorkspaceSearchModeColor(m_searchMode), "%s", WorkspaceSearchModeLabel(m_searchMode));
         }
         ImGui::SetNextItemWidth(-1.0f);
         if (m_focusSearch)
@@ -743,10 +1051,12 @@ namespace Software::Modes::Slate
         InputTextString("##SearchQuery", m_searchBuffer, 0);
         ImGui::Separator();
 
-        if (m_searchBuffer.empty())
+        const bool showQueryHint = m_searchBuffer.empty() &&
+                                   (documentFind || m_searchMode != Software::Slate::SearchMode::Recent);
+        if (showQueryHint)
         {
             ImGui::TextColored(Muted, "%s", documentFind ? "type to find in this file"
-                                                         : "type to search filenames. Tab toggles full text");
+                                                         : WorkspaceSearchModeHint(m_searchMode));
         }
         else if (m_visibleSearchResults.empty())
         {
@@ -779,6 +1089,279 @@ namespace Software::Modes::Slate
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
+    }
+
+    void SlateModeBase::DrawWorkspaceOverlay(Software::Core::Runtime::AppContext& context)
+    {
+        auto& workspace = WorkspaceContext(context);
+        auto& ui = UiState(context);
+        auto& registry = workspace.WorkspaceRegistry();
+        const auto& vaults = registry.Vaults();
+        ui.workspaceNavigation.SetCount(vaults.size());
+
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        {
+            ui.workspaceNavigation.MoveNext();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        {
+            ui.workspaceNavigation.MovePrevious();
+        }
+        if ((IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+            ui.workspaceNavigation.HasSelection() && !vaults.empty())
+        {
+            const auto selectedVault = vaults[ui.workspaceNavigation.Selected()];
+            m_workspaceOverlayOpen = false;
+            OpenVault(selectedVault, context);
+            return;
+        }
+        if (IsKeyPressed(ImGuiKey_N))
+        {
+            m_workspaceOverlayOpen = false;
+            ShowWorkspaceSetup(context);
+            SetStatus("press n to create a workspace");
+            return;
+        }
+        if (IsKeyPressed(ImGuiKey_D) && ui.workspaceNavigation.HasSelection() && !vaults.empty())
+        {
+            const auto id = vaults[ui.workspaceNavigation.Selected()].id;
+            if (registry.RemoveVault(id))
+            {
+                registry.Save(nullptr);
+                ui.workspaceNavigation.SetCount(registry.Vaults().size());
+                SetStatus("workspace removed from list");
+                if (registry.Vaults().empty())
+                {
+                    m_workspaceOverlayOpen = false;
+                    ShowWorkspaceSetup(context);
+                    return;
+                }
+            }
+        }
+        if (IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_workspaceOverlayOpen = false;
+            return;
+        }
+
+        const ImVec2 size(std::min(760.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.58f)),
+                          std::min(460.0f, std::max(240.0f, ImGui::GetWindowHeight() * 0.46f)));
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
+                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Green.x, Green.y, Green.z, 0.30f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
+        ImGui::BeginChild("WorkspaceOverlay", size, true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
+        ImGui::TextColored(Green, "workspaces");
+        ImGui::Separator();
+
+        if (vaults.empty())
+        {
+            ImGui::TextColored(Muted, "no workspaces registered");
+        }
+        else
+        {
+            const auto* activeVault = registry.ActiveVault();
+            for (std::size_t i = 0; i < vaults.size(); ++i)
+            {
+                const bool selected = i == ui.workspaceNavigation.Selected();
+                const bool active = activeVault && vaults[i].id == activeVault->id;
+                const auto& vault = vaults[i];
+                ImGui::TextColored(selected ? Green : Primary, "%s %s %s%s",
+                                   selected ? ">" : " ", vault.emoji.c_str(), vault.title.c_str(),
+                                   active ? " *" : "");
+                ImGui::SameLine();
+                ImGui::TextColored(Muted, "%s", vault.path.string().c_str());
+            }
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+    }
+
+    void SlateModeBase::DrawTodoOverlay(Software::Core::Runtime::AppContext& context)
+    {
+        auto& workspace = WorkspaceContext(context);
+        const bool allowInput = !m_todoForm.open;
+        m_visibleTodos = CollectTodos(workspace);
+        m_visibleTodos.erase(std::remove_if(m_visibleTodos.begin(),
+                                            m_visibleTodos.end(),
+                                            [this](const auto& todo) {
+                                                return !MatchesTodoFilter(todo, m_todoStateFilter) ||
+                                                       !TodoMatchesQuery(todo, m_todoSearchBuffer);
+                                            }),
+                             m_visibleTodos.end());
+        m_todoNavigation.SetCount(m_visibleTodos.size());
+
+        if (allowInput && IsKeyPressed(ImGuiKey_Tab))
+        {
+            m_todoStateFilter = (m_todoStateFilter + 1) % 5;
+            m_todoNavigation.Reset();
+        }
+        if (allowInput && !ImGui::GetIO().KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        {
+            m_focusTodoSearch = true;
+        }
+        if (allowInput && ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        {
+            m_todoNavigation.MoveNext();
+        }
+        if (allowInput && ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        {
+            m_todoNavigation.MovePrevious();
+        }
+        if (allowInput && IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_todoOverlayOpen = false;
+            if (WantsNativeEditorVisible(context))
+            {
+                EditorContext(context).Editor().RequestFocus();
+                EditorContext(context).SetTextFocused(true);
+            }
+            return;
+        }
+        if (allowInput && (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+            m_todoNavigation.HasSelection() && !m_visibleTodos.empty())
+        {
+            BeginTodoEdit(m_visibleTodos[m_todoNavigation.Selected()]);
+            return;
+        }
+        if (allowInput && IsKeyPressed(ImGuiKey_O) && m_todoNavigation.HasSelection() && !m_visibleTodos.empty())
+        {
+            const auto todo = m_visibleTodos[m_todoNavigation.Selected()];
+            m_todoOverlayOpen = false;
+            if (OpenDocument(todo.relativePath, context))
+            {
+                EditorContext(context).JumpToLine(todo.line);
+            }
+            return;
+        }
+
+        const ImVec2 size(std::min(760.0f, std::max(420.0f, ImGui::GetWindowWidth() * 0.60f)),
+                          std::min(500.0f, std::max(280.0f, ImGui::GetWindowHeight() * 0.54f)));
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
+                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Amber.x, Amber.y, Amber.z, 0.30f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
+        ImGui::BeginChild("TodoOverlay", size, true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::TextColored(Amber, "todos");
+        ImGui::SameLine();
+        ImGui::TextColored(TodoFilterColor(m_todoStateFilter), "%s", TodoFilterLabel(m_todoStateFilter));
+        ImGui::SetNextItemWidth(-1.0f);
+        if (allowInput && m_focusTodoSearch)
+        {
+            ImGui::SetKeyboardFocusHere();
+            m_focusTodoSearch = false;
+        }
+        InputTextString("##TodoSearch", m_todoSearchBuffer, allowInput ? 0 : ImGuiInputTextFlags_ReadOnly);
+        ImGui::Separator();
+
+        if (m_visibleTodos.empty())
+        {
+            ImGui::TextColored(Muted, "no todos");
+        }
+        else
+        {
+            Software::Slate::TodoState currentGroup = Software::Slate::TodoState::Open;
+            bool groupStarted = false;
+            for (std::size_t i = 0; i < m_visibleTodos.size(); ++i)
+            {
+                const auto& todo = m_visibleTodos[i];
+                const ImVec4& stateColor = TodoStateColor(todo.state);
+                if (m_todoStateFilter == 0 && (!groupStarted || todo.state != currentGroup))
+                {
+                    if (groupStarted)
+                    {
+                        ImGui::Dummy(ImVec2(1.0f, 6.0f));
+                    }
+                    currentGroup = todo.state;
+                    groupStarted = true;
+                    ImGui::TextColored(stateColor, "%s", Software::Slate::MarkdownService::TodoStateLabel(todo.state));
+                    ImGui::Separator();
+                }
+
+                const bool selected = i == m_todoNavigation.Selected();
+                ImGui::TextColored(selected ? Green : Primary, "%s %s", selected ? ">" : " ", todo.title.c_str());
+                ImGui::SameLine();
+                ImGui::TextColored(stateColor, "[%s]", Software::Slate::MarkdownService::TodoStateLabel(todo.state));
+                ImGui::SameLine();
+                ImGui::TextColored(Muted, "%s:%zu", todo.relativePath.generic_string().c_str(), todo.line);
+                if (!todo.description.empty())
+                {
+                    ImGui::TextColored(Muted, "    %s", todo.description.c_str());
+                }
+            }
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+    }
+
+    void SlateModeBase::DrawTodoFormOverlay(Software::Core::Runtime::AppContext& context)
+    {
+        const ImVec2 size(std::min(620.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.52f)),
+                          std::min(280.0f, std::max(220.0f, ImGui::GetWindowHeight() * 0.34f)));
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
+                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Amber.x, Amber.y, Amber.z, 0.30f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
+        ImGui::BeginChild("TodoFormOverlay", size, true);
+        ImGui::TextColored(Amber, "%s", m_todoForm.mode == TodoFormMode::Create ? "new todo" : "edit todo");
+        ImGui::SameLine();
+        ImGui::TextColored(TodoStateColor(m_todoForm.state),
+                           "[%s]",
+                           Software::Slate::MarkdownService::TodoStateLabel(m_todoForm.state));
+        if (m_todoForm.focusTitle)
+        {
+            ImGui::SetKeyboardFocusHere();
+            m_todoForm.focusTitle = false;
+        }
+        ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
+        ImGui::SetNextItemWidth(-1.0f);
+        const auto titleResult =
+            InputTextString("##TodoTitle", m_todoForm.title, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SetNextItemWidth(-1.0f);
+        const auto descriptionResult =
+            InputTextString("##TodoDescription", m_todoForm.description, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::PopItemFlag();
+        ImGui::Separator();
+        DrawShortcutText("(tab) state   (enter) save   (esc) cancel", Amber, Primary);
+        ImGui::EndChild();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+
+        if (IsKeyPressed(ImGuiKey_Tab))
+        {
+            m_todoForm.state = Software::Slate::MarkdownService::NextTodoState(m_todoForm.state);
+        }
+        if (IsKeyPressed(ImGuiKey_Escape))
+        {
+            m_todoForm = {};
+            if (!m_todoOverlayOpen && WantsNativeEditorVisible(context))
+            {
+                EditorContext(context).Editor().RequestFocus();
+                EditorContext(context).SetTextFocused(true);
+            }
+            return;
+        }
+        if (titleResult.submitted || descriptionResult.submitted)
+        {
+            if (AcceptTodoForm(context))
+            {
+                return;
+            }
+        }
     }
 
     void SlateModeBase::DrawPromptOverlay(Software::Core::Runtime::AppContext& context)
@@ -899,9 +1482,19 @@ namespace Software::Modes::Slate
             {
                 return "(up/down) move   (enter) jump   (shift+enter) prev   (esc) close";
             }
-            return m_searchMode == Software::Slate::SearchMode::FileNames
-                       ? "(tab) full text   (up/down) move   (enter) open   (esc) close"
-                       : "(tab) files   (up/down) move   (enter) open   (esc) close";
+            return NextSearchModeHelper(m_searchMode);
+        }
+        if (m_workspaceOverlayOpen)
+        {
+            return "(up/down) choose   (enter) switch   (n) new   (d) remove   (esc) close";
+        }
+        if (m_todoForm.open)
+        {
+            return "(tab) state   (enter) save   (esc) cancel";
+        }
+        if (m_todoOverlayOpen)
+        {
+            return "(tab) state   (/) filter   (enter) edit   (o) open   (esc) close";
         }
         if (m_prompt.open)
         {
@@ -930,7 +1523,8 @@ namespace Software::Modes::Slate
             SaveActiveDocument(context);
         }
 
-        if (m_prompt.open || m_confirm.open || m_searchOverlayOpen)
+        if (m_prompt.open || m_confirm.open || m_searchOverlayOpen || m_workspaceOverlayOpen || m_todoOverlayOpen ||
+            m_todoForm.open)
         {
             return;
         }
@@ -972,6 +1566,22 @@ namespace Software::Modes::Slate
             return;
         }
 
+        if (IsKeyPressed(ImGuiKey_W))
+        {
+            ShowWorkspaceSwitcher(context);
+            return;
+        }
+        if (IsKeyPressed(ImGuiKey_T))
+        {
+            ShowTodos(context);
+            return;
+        }
+        if (IsKeyPressed(ImGuiKey_C))
+        {
+            ShowSettings(context);
+            return;
+        }
+
         if (IsCtrlPressed(ImGuiKey_Q))
         {
             BeginQuitConfirm();
@@ -1001,6 +1611,153 @@ namespace Software::Modes::Slate
         {
             EditorContext(context).JumpToLine(result.line);
         }
+    }
+
+    void SlateModeBase::BeginTodoEdit(const Software::Slate::TodoTicket& ticket)
+    {
+        m_todoForm = {};
+        m_todoForm.open = true;
+        m_todoForm.focusTitle = true;
+        m_todoForm.mode = TodoFormMode::Edit;
+        m_todoForm.ticket = ticket;
+        m_todoForm.state = ticket.state;
+        m_todoForm.title = ticket.title;
+        m_todoForm.description = ticket.description;
+    }
+
+    bool SlateModeBase::AcceptTodoForm(Software::Core::Runtime::AppContext& context)
+    {
+        const auto state = m_todoForm.state;
+        const std::string title = Software::Slate::PathUtils::Trim(m_todoForm.title).empty()
+                                      ? "Untitled todo"
+                                      : Software::Slate::PathUtils::Trim(m_todoForm.title);
+        const std::string description = Software::Slate::PathUtils::Trim(m_todoForm.description);
+
+        if (m_todoForm.mode == TodoFormMode::Create)
+        {
+            const std::string block = Software::Slate::MarkdownService::FormatTodoBlock(
+                state, title, description, WorkspaceContext(context).Documents().Active()
+                                               ? WorkspaceContext(context).Documents().Active()->lineEnding
+                                               : "\n");
+            bool inserted = false;
+            if (m_todoForm.replaceActiveLine)
+            {
+                inserted = EditorContext(context).ReplaceActiveLineWithText(
+                    WorkspaceContext(context).Documents(), block, m_nowSeconds);
+            }
+            else
+            {
+                EditorContext(context).InsertTextAtCursor(WorkspaceContext(context).Documents(), block, m_nowSeconds);
+                inserted = true;
+            }
+
+            if (!inserted)
+            {
+                SetError("could not insert todo");
+                return false;
+            }
+
+            WorkspaceContext(context).Workspace().Scan(nullptr);
+            WorkspaceContext(context).Search().Rebuild(WorkspaceContext(context).Workspace());
+            SetStatus("todo created");
+        }
+        else
+        {
+            if (!UpdateTodoTicket(context, m_todoForm.ticket, state, title, description))
+            {
+                return false;
+            }
+            SetStatus("todo updated");
+        }
+
+        m_todoForm = {};
+        m_focusTodoSearch = false;
+        if (!m_todoOverlayOpen && WantsNativeEditorVisible(context))
+        {
+            EditorContext(context).Editor().RequestFocus();
+            EditorContext(context).SetTextFocused(true);
+        }
+        return true;
+    }
+
+    bool SlateModeBase::UpdateTodoTicket(Software::Core::Runtime::AppContext& context,
+                                         const Software::Slate::TodoTicket& ticket,
+                                         Software::Slate::TodoState state,
+                                         std::string_view title,
+                                         std::string_view description)
+    {
+        auto& workspace = WorkspaceContext(context);
+        auto& documents = workspace.Documents();
+        auto& editor = EditorContext(context);
+        const auto normalized = Software::Slate::PathUtils::NormalizeRelative(ticket.relativePath);
+        auto* active = documents.Active();
+        std::string updatedText;
+        std::string preservedTitle = Software::Slate::PathUtils::Trim(title);
+        for (const auto& tag : ticket.tags)
+        {
+            if (tag.empty() || tag == "todo")
+            {
+                continue;
+            }
+            const std::string token = "#" + tag;
+            if (!ContainsFilter(preservedTitle, token.c_str()))
+            {
+                if (!preservedTitle.empty())
+                {
+                    preservedTitle += " ";
+                }
+                preservedTitle += token;
+            }
+        }
+
+        if (active && Software::Slate::PathUtils::NormalizeRelative(active->relativePath) == normalized)
+        {
+            if (!Software::Slate::MarkdownService::ReplaceTodoTicketBlock(active->text,
+                                                                          ticket,
+                                                                          state,
+                                                                          preservedTitle,
+                                                                          description,
+                                                                          &updatedText))
+            {
+                SetError("could not update todo");
+                return false;
+            }
+
+            active->text = updatedText;
+            documents.MarkEdited(m_nowSeconds);
+            editor.LoadFromActiveDocument(documents);
+            editor.JumpToLine(ticket.line);
+        }
+        else
+        {
+            std::string text;
+            std::string error;
+            const auto absolutePath = workspace.Workspace().Resolve(normalized);
+            if (!Software::Slate::DocumentService::ReadTextFile(absolutePath, &text, &error))
+            {
+                SetError(error);
+                return false;
+            }
+            if (!Software::Slate::MarkdownService::ReplaceTodoTicketBlock(text,
+                                                                          ticket,
+                                                                          state,
+                                                                          preservedTitle,
+                                                                          description,
+                                                                          &updatedText))
+            {
+                SetError("could not update todo");
+                return false;
+            }
+            if (!Software::Slate::DocumentService::AtomicWriteText(absolutePath, updatedText, &error))
+            {
+                SetError(error);
+                return false;
+            }
+        }
+
+        workspace.Workspace().Scan(nullptr);
+        workspace.Search().Rebuild(workspace.Workspace());
+        return true;
     }
 }
 

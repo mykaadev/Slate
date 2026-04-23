@@ -1,7 +1,7 @@
 #include "App/Slate/UI/SlateUi.h"
 
-#include "App/Slate/MarkdownService.h"
-#include "App/Slate/PathUtils.h"
+#include "App/Slate/Markdown/MarkdownService.h"
+#include "App/Slate/Core/PathUtils.h"
 
 #include <algorithm>
 #include <cctype>
@@ -165,6 +165,31 @@ namespace Software::Slate::UI
                 ++count;
             }
             return count;
+        }
+
+        bool StartsWith(std::string_view value, std::string_view prefix)
+        {
+            return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+        }
+
+        bool IsHeadingLine(std::string_view trimmed, std::size_t* hashes = nullptr)
+        {
+            std::size_t count = 0;
+            while (count < trimmed.size() && count < 6 && trimmed[count] == '#')
+            {
+                ++count;
+            }
+
+            if (count == 0 || count >= trimmed.size() || std::isspace(static_cast<unsigned char>(trimmed[count])) == 0)
+            {
+                return false;
+            }
+
+            if (hashes)
+            {
+                *hashes = count;
+            }
+            return true;
         }
 
         std::string VisibleWhitespace(std::string_view text)
@@ -446,6 +471,81 @@ namespace Software::Slate::UI
         return row.relativePath.filename().string();
     }
 
+    const ImVec4& TodoStateColor(TodoState state)
+    {
+        switch (state)
+        {
+        case TodoState::Open:
+            return Red;
+        case TodoState::Research:
+            return Amber;
+        case TodoState::Doing:
+            return Cyan;
+        case TodoState::Done:
+            return Green;
+        }
+        return Primary;
+    }
+
+    const ImVec4& MarkdownLineBaseColor(const std::string& line, bool inCodeFence, bool inFrontmatter)
+    {
+        const std::string trimmed = PathUtils::Trim(line);
+        if (trimmed.empty())
+        {
+            return Primary;
+        }
+
+        if (inFrontmatter)
+        {
+            return Muted;
+        }
+
+        if (trimmed.rfind("```", 0) == 0 || trimmed.rfind("~~~", 0) == 0 || inCodeFence)
+        {
+            return MarkdownCode;
+        }
+
+        TodoState todoState = TodoState::Open;
+        if (MarkdownService::ParseTodoLine(trimmed, &todoState, nullptr, nullptr))
+        {
+            return TodoStateColor(todoState);
+        }
+
+        std::size_t headingLevel = 0;
+        if (IsHeadingLine(trimmed, &headingLevel))
+        {
+            return headingLevel == 1 ? MarkdownHeading1 : (headingLevel == 2 ? MarkdownHeading2 : MarkdownHeading3);
+        }
+
+        if (trimmed.rfind("- [ ]", 0) == 0 || trimmed.rfind("* [ ]", 0) == 0 || trimmed.rfind("+ [ ]", 0) == 0)
+        {
+            return MarkdownCheckbox;
+        }
+
+        if (trimmed.rfind("- [x]", 0) == 0 || trimmed.rfind("- [X]", 0) == 0 || trimmed.rfind("* [x]", 0) == 0 ||
+            trimmed.rfind("* [X]", 0) == 0 || trimmed.rfind("+ [x]", 0) == 0 || trimmed.rfind("+ [X]", 0) == 0)
+        {
+            return MarkdownCheckboxDone;
+        }
+
+        if (trimmed[0] == '>')
+        {
+            return MarkdownQuote;
+        }
+
+        if (trimmed.find("![](") != std::string::npos || trimmed.find("![") != std::string::npos)
+        {
+            return MarkdownImage;
+        }
+
+        if (trimmed.find('|') != std::string::npos)
+        {
+            return MarkdownTable;
+        }
+
+        return Primary;
+    }
+
     void DrawMarkdownImage(const fs::path& absolutePath, std::string_view alt, std::string_view target,
                            float maxWidth)
     {
@@ -592,80 +692,110 @@ namespace Software::Slate::UI
             const std::string displayText = DisplayText(line, showWhitespace);
             ImGui::TextColored(MarkdownCode, "%s", displayText.c_str());
         }
-        else if (trimmed[0] == '#')
+        else
         {
-            std::size_t hashes = 0;
-            while (hashes < trimmed.size() && trimmed[hashes] == '#')
+            TodoState todoState = TodoState::Open;
+            std::string todoTitle;
+            if (MarkdownService::ParseTodoLine(trimmed, &todoState, &todoTitle, nullptr))
             {
-                ++hashes;
-            }
-            const std::string title = PathUtils::Trim(std::string_view(trimmed).substr(hashes));
-            const float scale = 1.0f;
-            const ImVec4 headingColor = hashes == 1 ? MarkdownHeading1 : (hashes == 2 ? MarkdownHeading2 : MarkdownHeading3);
-            ImGui::SetWindowFontScale(fontScale * scale);
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(title.empty() ? "heading" : title), headingColor,
-                            showWhitespace);
-            ImGui::SetWindowFontScale(fontScale);
-        }
-        else if (trimmed.rfind("- [ ]", 0) == 0 || trimmed.rfind("* [ ]", 0) == 0 ||
-                 trimmed.rfind("+ [ ]", 0) == 0)
-        {
-            ImGui::TextColored(MarkdownCheckbox, "[ ]");
-            ImGui::SameLine();
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(5))), Primary,
-                            showWhitespace);
-        }
-        else if (trimmed.rfind("- [x]", 0) == 0 || trimmed.rfind("- [X]", 0) == 0 || trimmed.rfind("* [x]", 0) == 0 ||
-                 trimmed.rfind("* [X]", 0) == 0 || trimmed.rfind("+ [x]", 0) == 0 || trimmed.rfind("+ [X]", 0) == 0)
-        {
-            ImGui::TextColored(MarkdownCheckboxDone, "[x]");
-            ImGui::SameLine();
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(5))), Primary,
-                            showWhitespace);
-        }
-        else if (trimmed[0] == '>')
-        {
-            ImGui::TextColored(MarkdownQuote, "|");
-            ImGui::SameLine();
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(1))), MarkdownQuote,
-                            showWhitespace);
-        }
-        else if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0 || trimmed.rfind("+ ", 0) == 0)
-        {
-            ImGui::TextColored(MarkdownBullet, "*");
-            ImGui::SameLine();
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed.substr(2)), Primary, showWhitespace);
-        }
-        else if (!trimmed.empty() && std::isdigit(static_cast<unsigned char>(trimmed[0])))
-        {
-            const std::size_t dot = trimmed.find(". ");
-            if (dot != std::string::npos)
-            {
-                ImGui::TextColored(MarkdownBullet, "%s", trimmed.substr(0, dot + 1).c_str());
-                ImGui::SameLine();
-                DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed.substr(dot + 2)), Primary, showWhitespace);
+                const ImVec4& stateColor = TodoStateColor(todoState);
+                if (StartsWith(trimmed, "#todo"))
+                {
+                    ImGui::TextColored(stateColor, "#todo");
+                    ImGui::SameLine();
+                    ImGui::TextColored(stateColor, "- [%s] -", MarkdownService::TodoStateLabel(todoState));
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(todoTitle), Primary, showWhitespace);
+                }
+                else
+                {
+                    ImGui::TextColored(todoState == TodoState::Done ? MarkdownCheckboxDone : MarkdownCheckbox,
+                                       todoState == TodoState::Done ? "[x]" : "[ ]");
+                    ImGui::SameLine();
+                    ImGui::TextColored(stateColor, "#todo");
+                    ImGui::SameLine();
+                    ImGui::TextColored(stateColor, "[%s]", MarkdownService::TodoStateLabel(todoState));
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(todoTitle), Primary, showWhitespace);
+                }
             }
             else
             {
-                DrawInlineSpans(MarkdownService::ParseInlineSpans(line), Primary, showWhitespace);
+                std::size_t hashes = 0;
+                if (IsHeadingLine(trimmed, &hashes))
+                {
+                    const std::string title = PathUtils::Trim(std::string_view(trimmed).substr(hashes));
+                    const float scale = 1.0f;
+                    const ImVec4 headingColor =
+                        hashes == 1 ? MarkdownHeading1 : (hashes == 2 ? MarkdownHeading2 : MarkdownHeading3);
+                    ImGui::SetWindowFontScale(fontScale * scale);
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(title.empty() ? "heading" : title), headingColor,
+                                    showWhitespace);
+                    ImGui::SetWindowFontScale(fontScale);
+                }
+                else if (trimmed.rfind("- [ ]", 0) == 0 || trimmed.rfind("* [ ]", 0) == 0 ||
+                         trimmed.rfind("+ [ ]", 0) == 0)
+                {
+                    ImGui::TextColored(MarkdownCheckbox, "[ ]");
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(5))), Primary,
+                                    showWhitespace);
+                }
+                else if (trimmed.rfind("- [x]", 0) == 0 || trimmed.rfind("- [X]", 0) == 0 ||
+                         trimmed.rfind("* [x]", 0) == 0 || trimmed.rfind("* [X]", 0) == 0 ||
+                         trimmed.rfind("+ [x]", 0) == 0 || trimmed.rfind("+ [X]", 0) == 0)
+                {
+                    ImGui::TextColored(MarkdownCheckboxDone, "[x]");
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(5))), Primary,
+                                    showWhitespace);
+                }
+                else if (trimmed[0] == '>')
+                {
+                    ImGui::TextColored(MarkdownQuote, "|");
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(PathUtils::Trim(trimmed.substr(1))), MarkdownQuote,
+                                    showWhitespace);
+                }
+                else if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0 || trimmed.rfind("+ ", 0) == 0)
+                {
+                    ImGui::TextColored(MarkdownBullet, "*");
+                    ImGui::SameLine();
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed.substr(2)), Primary, showWhitespace);
+                }
+                else if (!trimmed.empty() && std::isdigit(static_cast<unsigned char>(trimmed[0])))
+                {
+                    const std::size_t dot = trimmed.find(". ");
+                    if (dot != std::string::npos)
+                    {
+                        ImGui::TextColored(MarkdownBullet, "%s", trimmed.substr(0, dot + 1).c_str());
+                        ImGui::SameLine();
+                        DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed.substr(dot + 2)), Primary,
+                                        showWhitespace);
+                    }
+                    else
+                    {
+                        DrawInlineSpans(MarkdownService::ParseInlineSpans(line), Primary, showWhitespace);
+                    }
+                }
+                else if (trimmed.find("![](") != std::string::npos || trimmed.find("![") != std::string::npos)
+                {
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed), MarkdownImage, showWhitespace);
+                }
+                else if (trimmed.find("](") != std::string::npos || trimmed.find("[[") != std::string::npos)
+                {
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed), Primary, showWhitespace);
+                }
+                else if (trimmed.find('|') != std::string::npos)
+                {
+                    const std::string displayText = DisplayText(trimmed, showWhitespace);
+                    ImGui::TextColored(MarkdownTable, "%s", displayText.c_str());
+                }
+                else
+                {
+                    DrawInlineSpans(MarkdownService::ParseInlineSpans(line), Primary, showWhitespace);
+                }
             }
-        }
-        else if (trimmed.find("![](") != std::string::npos || trimmed.find("![") != std::string::npos)
-        {
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed), MarkdownImage, showWhitespace);
-        }
-        else if (trimmed.find("](") != std::string::npos || trimmed.find("[[") != std::string::npos)
-        {
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(trimmed), Primary, showWhitespace);
-        }
-        else if (trimmed.find('|') != std::string::npos)
-        {
-            const std::string displayText = DisplayText(trimmed, showWhitespace);
-            ImGui::TextColored(MarkdownTable, "%s", displayText.c_str());
-        }
-        else
-        {
-            DrawInlineSpans(MarkdownService::ParseInlineSpans(line), Primary, showWhitespace);
         }
 
         if (indentWidth > 0.0f)

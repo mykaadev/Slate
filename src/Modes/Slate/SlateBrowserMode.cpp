@@ -1,10 +1,10 @@
 #include "Modes/Slate/SlateBrowserMode.h"
 
-#include "App/Slate/PathUtils.h"
-#include "App/Slate/SlateEditorContext.h"
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateUiState.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Editor/SlateEditorContext.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateUiState.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"

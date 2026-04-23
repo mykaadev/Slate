@@ -1,42 +1,17 @@
-# ========================================================================
-# Minimum required version of CMake
-# ========================================================================
 cmake_minimum_required(VERSION 3.15)
-
-# ========================================================================
-# Centralized project metadata
-# ========================================================================
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(AppMetadata)
-
-# ========================================================================
-# Project Info
-# ========================================================================
 project(${SOFTWARE_TARGET_NAME} VERSION ${SOFTWARE_APP_VERSION} LANGUAGES CXX)
-
-# Use modern C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
-    # Static runtime keeps the portable build down to the app itself.
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-# Set binary output directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-# Set OpenGL to prefer legacy (fixed-function pipeline)
 set(OpenGL_GL_PREFERENCE "LEGACY")
-
-# ========================================================================
-# Dependencies
-# ========================================================================
 include(FetchContent)
-
-# -------------------------
-# GLFW (Window + Input)
-# -------------------------
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "Disable GLFW docs" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
@@ -47,20 +22,12 @@ FetchContent_Declare(
     GIT_TAG 3.4
 )
 FetchContent_MakeAvailable(glfw)
-
-# -------------------------
-# ImGui (UI Library)
-# -------------------------
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
     GIT_TAG docking
 )
 FetchContent_MakeAvailable(imgui)
-
-# -------------------------
-# nlohmann::json (Optional config/settings)
-# -------------------------
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json
@@ -159,25 +126,13 @@ if(WIN32)
     )
     target_compile_definitions(SlateMarkdownLexer PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE=1)
 endif()
-
-# -------------------------
-# OpenGL (Rendering)
-# -------------------------
 find_package(OpenGL REQUIRED)
-
-# ========================================================================
-# Generated config header (project name, version, etc.)
-# ========================================================================
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/Core/Runtime")
 configure_file(
     "${CMAKE_SOURCE_DIR}/src/Framework/Core/Runtime/AppConfig.h.in"
     "${CMAKE_BINARY_DIR}/generated/Core/Runtime/AppConfig.h"
     @ONLY
 )
-
-# ========================================================================
-# ImGui Static Library Setup
-# ========================================================================
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -193,10 +148,6 @@ target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}/backends
     ${glfw_SOURCE_DIR}/include
 )
-
-# ========================================================================
-# Framework Target (generic reusable infrastructure)
-# ========================================================================
 file(GLOB_RECURSE FRAMEWORK_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/Framework/*.cpp"
 )
@@ -215,14 +166,13 @@ target_link_libraries(SoftwareFramework PUBLIC
     nlohmann_json
     ${CMAKE_DL_LIBS}
 )
-
-# ========================================================================
-# Application Target (your project code built on top of the framework)
-# ========================================================================
-file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/App/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/Features/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/Modes/*.cpp"
+file(GLOB_RECURSE SLATE_APP_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/App/Application.cpp"
+    "${CMAKE_SOURCE_DIR}/src/App/DefaultModules/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/App/Runtime/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/App/Slate/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Features/Slate/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Modes/Slate/*.cpp"
 )
 
 set(SLATE_APP_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/app/icon.ico")
@@ -234,15 +184,15 @@ if(WIN32 AND EXISTS "${SLATE_APP_ICON_PATH}")
         "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc"
         @ONLY
     )
-    list(APPEND APP_SOURCES "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc")
+    list(APPEND SLATE_APP_SOURCES "${CMAKE_BINARY_DIR}/generated/App/Resources/WindowsApp.rc")
 elseif(WIN32)
     message(STATUS "No Windows app icon found at ${SLATE_APP_ICON_PATH}; building without an embedded icon.")
 endif()
 
 if(WIN32)
-    add_executable(${PROJECT_NAME} WIN32 ${APP_SOURCES})
+    add_executable(${PROJECT_NAME} WIN32 ${SLATE_APP_SOURCES})
 else()
-    add_executable(${PROJECT_NAME} ${APP_SOURCES})
+    add_executable(${PROJECT_NAME} ${SLATE_APP_SOURCES})
 endif()
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -267,10 +217,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/slate"
     COMMENT "Copying Slate preset assets"
 )
-
-# ========================================================================
-# Tests
-# ========================================================================
 enable_testing()
 
 file(GLOB_RECURSE SLATE_CORE_SOURCES CONFIGURE_DEPENDS
@@ -296,10 +242,6 @@ if(WIN32)
         SlateMarkdownLexer
     )
 endif()
-
-# ========================================================================
-# Platform-Specific Linking
-# ========================================================================
 if(WIN32)
     target_link_libraries(SoftwareFramework PRIVATE dwmapi)
     target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
@@ -308,10 +250,6 @@ elseif(APPLE)
     find_library(OPENGL_FRAMEWORK OpenGL)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK})
 endif()
-
-# ========================================================================
-# Portable Packaging
-# ========================================================================
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION "."
 )

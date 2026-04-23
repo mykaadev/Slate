@@ -1,8 +1,8 @@
 #include "Modes/Slate/SlateSettingsMode.h"
 
-#include "App/Slate/EditorSettingsService.h"
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -47,14 +47,24 @@ namespace Software::Modes::Slate
             const char* label = "";
         };
 
-        const std::array<NamedIntOption, 5>& FontSizeOptions()
+        const std::array<NamedIntOption, 15>& FontSizeOptions()
         {
-            static constexpr std::array<NamedIntOption, 5> options{{
+            static constexpr std::array<NamedIntOption, 15> options{{
+                {10, "10"},
+                {11, "11"},
+                {12, "12"},
                 {13, "13"},
                 {14, "14"},
                 {15, "15"},
+                {16, "16"},
                 {17, "17"},
+                {18, "18"},
                 {19, "19"},
+                {20, "20"},
+                {21, "21"},
+                {22, "22"},
+                {23, "23"},
+                {24, "24"},
             }};
             return options;
         }

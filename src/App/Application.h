@@ -2,13 +2,11 @@
 
 namespace Software::Core::App
 {
-    /** Application entry point responsible for running the main loop. */
+    // Runs the Slate app loop
     class Application
     {
-    // Functions
     public:
-
-        /** Runs the platform loop and dispatches framework updates. */
+        // Builds the runtime and drives each frame
         int Run();
     };
 }

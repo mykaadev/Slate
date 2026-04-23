@@ -2,14 +2,14 @@
 
 #include <memory>
 
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateUiState.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateUiState.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "Core/Runtime/FeatureRegistry.h"
 #include "Core/Runtime/ToolRegistry.h"
-#include "Features/SlateEditor/SlateEditorFeature.h"
-#include "Features/SlateUi/SlateUiFeature.h"
-#include "Features/SlateWorkspace/SlateWorkspaceFeature.h"
+#include "Features/Slate/Editor/SlateEditorFeature.h"
+#include "Features/Slate/Ui/SlateUiFeature.h"
+#include "Features/Slate/Workspace/SlateWorkspaceFeature.h"
 #include "Modes/Slate/SlateBrowserMode.h"
 #include "Modes/Slate/SlateEditorMode.h"
 #include "Modes/Slate/SlateHomeMode.h"
@@ -18,45 +18,49 @@
 
 namespace Software::App::DefaultModules
 {
-    void Register(Software::Core::Runtime::AppContext& InContext)
+    // Registers the live Slate features
+    void Register(Software::Core::Runtime::AppContext& context)
     {
-        InContext.features.Register("SlateWorkspace", []() {
+        context.features.Register("SlateWorkspace", []() {
             return std::make_shared<Software::Features::SlateWorkspace::SlateWorkspaceFeature>();
-        }, InContext);
-        InContext.features.Register("SlateEditor", []() {
+        }, context);
+        context.features.Register("SlateEditor", []() {
             return std::make_shared<Software::Features::SlateEditor::SlateEditorFeature>();
-        }, InContext);
-        InContext.features.Register("SlateUi", []() {
+        }, context);
+        context.features.Register("SlateUi", []() {
             return std::make_shared<Software::Features::SlateUi::SlateUiFeature>();
-        }, InContext);
+        }, context);
 
-        InContext.features.SetEnabled("SlateWorkspace", true, InContext);
-        InContext.features.SetEnabled("SlateEditor", true, InContext);
-        InContext.features.SetEnabled("SlateUi", true, InContext);
+        // Enables the core feature set right away
+        context.features.SetEnabled("SlateWorkspace", true, context);
+        context.features.SetEnabled("SlateEditor", true, context);
+        context.features.SetEnabled("SlateUi", true, context);
 
-        InContext.tools.Register(Software::Slate::ModeIds::Workspace, []() {
+        // Registers the mode stack used by the app
+        context.tools.Register(Software::Slate::ModeIds::Workspace, []() {
             return std::make_unique<Software::Modes::Slate::SlateWorkspaceMode>();
         });
-        InContext.tools.Register(Software::Slate::ModeIds::Home, []() {
+        context.tools.Register(Software::Slate::ModeIds::Home, []() {
             return std::make_unique<Software::Modes::Slate::SlateHomeMode>();
         });
-        InContext.tools.Register(Software::Slate::ModeIds::Browser, []() {
+        context.tools.Register(Software::Slate::ModeIds::Browser, []() {
             return std::make_unique<Software::Modes::Slate::SlateBrowserMode>();
         });
-        InContext.tools.Register(Software::Slate::ModeIds::Editor, []() {
+        context.tools.Register(Software::Slate::ModeIds::Editor, []() {
             return std::make_unique<Software::Modes::Slate::SlateEditorMode>();
         });
-        InContext.tools.Register(Software::Slate::ModeIds::Settings, []() {
+        context.tools.Register(Software::Slate::ModeIds::Settings, []() {
             return std::make_unique<Software::Modes::Slate::SlateSettingsMode>();
         });
 
-        const auto workspace = InContext.services.Resolve<Software::Slate::SlateWorkspaceContext>();
-        const auto ui = InContext.services.Resolve<Software::Slate::SlateUiState>();
+        // Chooses the first mode based on workspace state
+        const auto workspace = context.services.Resolve<Software::Slate::SlateWorkspaceContext>();
+        const auto ui = context.services.Resolve<Software::Slate::SlateUiState>();
         if (workspace && ui && workspace->HasWorkspaceLoaded())
         {
             ui->ResetForWorkspace(workspace->Workspace());
             ui->workspaceView = Software::Slate::SlateWorkspaceView::Switcher;
-            InContext.tools.Activate(Software::Slate::ModeIds::Home, InContext);
+            context.tools.Activate(Software::Slate::ModeIds::Home, context);
         }
         else
         {
@@ -64,7 +68,7 @@ namespace Software::App::DefaultModules
             {
                 ui->workspaceView = Software::Slate::SlateWorkspaceView::Setup;
             }
-            InContext.tools.Activate(Software::Slate::ModeIds::Workspace, InContext);
+            context.tools.Activate(Software::Slate::ModeIds::Workspace, context);
         }
     }
 }

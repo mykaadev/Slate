@@ -1,11 +1,11 @@
 #include "Modes/Slate/SlateEditorMode.h"
 
-#include "App/Slate/EditorSettingsService.h"
-#include "App/Slate/PathUtils.h"
-#include "App/Slate/SlateEditorContext.h"
-#include "App/Slate/SlateModeIds.h"
-#include "App/Slate/SlateUiState.h"
-#include "App/Slate/SlateWorkspaceContext.h"
+#include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Editor/SlateEditorContext.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/State/SlateUiState.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -81,34 +81,27 @@ namespace Software::Modes::Slate
             const float previewT = SmoothProgress(previewProgress);
             const bool hasOutline = outlineT > 0.001f;
             const bool hasPreview = previewT > 0.001f;
-            const float desiredOutlineWidth = hasOutline
-                                                  ? std::min(300.0f, std::max(200.0f, width * 0.22f)) * outlineT
-                                                  : 0.0f;
+            const float outlineTargetWidth = hasOutline ? std::min(300.0f, std::max(200.0f, width * 0.22f)) : 0.0f;
+            const float desiredOutlineWidth = outlineTargetWidth * outlineT;
 
             if (panelLayout == 1 && (hasOutline || hasPreview))
             {
                 layout.outlineWidth = desiredOutlineWidth;
                 layout.outlineGap = hasOutline ? layout.gap * outlineT : 0.0f;
-
-                if (hasPreview)
-                {
-                    const float maxOutlineWidth = width > 520.0f ? width * 0.34f : width * 0.28f;
-                    layout.outlineWidth = std::min(layout.outlineWidth, std::max(0.0f, maxOutlineWidth));
-                    layout.previewGap = layout.gap * previewT;
-
-                    const float laneStart = layout.outlineWidth + layout.outlineGap;
-                    const float editorPreviewWidth = std::max(1.0f, width - laneStart - layout.previewGap);
-                    const float finalPreviewWidth = editorPreviewWidth * 0.5f;
-                    layout.previewWidth = std::clamp(finalPreviewWidth * previewT, 0.0f, editorPreviewWidth);
-                    layout.pageWidth = std::max(1.0f, editorPreviewWidth - layout.previewWidth);
-                    layout.pageOffset = laneStart;
-                    return layout;
-                }
+                const float maxOutlineWidth = width > 520.0f ? width * 0.34f : width * 0.28f;
+                layout.outlineWidth = std::min(layout.outlineWidth, std::max(0.0f, maxOutlineWidth));
+                layout.previewGap = hasPreview ? layout.gap * previewT : 0.0f;
 
                 const float laneStart = layout.outlineWidth + layout.outlineGap;
                 const float laneWidth = std::max(1.0f, width - laneStart);
-                layout.pageWidth = std::min(desiredPageWidth, laneWidth);
-                layout.pageOffset = laneStart + std::max(0.0f, (laneWidth - layout.pageWidth) * 0.5f);
+                if (hasPreview)
+                {
+                    const float previewTargetWidth = std::min(420.0f, std::max(240.0f, width * 0.32f));
+                    const float previewLimit = std::max(0.0f, laneWidth - layout.previewGap - 1.0f);
+                    layout.previewWidth = std::min(previewTargetWidth * previewT, previewLimit * 0.5f);
+                }
+                layout.pageWidth = std::max(1.0f, laneWidth - layout.previewGap - layout.previewWidth);
+                layout.pageOffset = laneStart;
                 return layout;
             }
 
@@ -606,6 +599,10 @@ namespace Software::Modes::Slate
                 {
                     togglePreviewPanel();
                 }
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Todo))
+                {
+                    BeginTodoCreate(context);
+                }
                 if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::NavigateBack))
                 {
                     NavigateDocumentHistory(context, -1);
@@ -679,7 +676,7 @@ namespace Software::Modes::Slate
         {
             return "(ctrl+p) edit   (ctrl+o) outline   (esc) editor";
         }
-        return "(ctrl+p) preview   (ctrl+o) outline   (ctrl+f) find   (ctrl+s) save   (esc) home";
+        return "(ctrl+p) preview   (ctrl+o) outline   (ctrl+f) find   (t) todos   (c) config   (ctrl+s) save   (esc) home";
     }
 
     void SlateEditorMode::DrawEditor(Software::Core::Runtime::AppContext& context,
@@ -1246,7 +1243,8 @@ namespace Software::Modes::Slate
 
                 ImGui::SetNextItemWidth(pageWidth);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.10f, 0.095f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, Primary);
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      MarkdownLineBaseColor(editor.ActiveLineText(), inCodeFence, lineIsFrontmatter));
                 int cursor = editor.CaretColumn();
                 const int cursorBeforeInput = cursor;
                 const int lineSizeBeforeInput = static_cast<int>(editor.ActiveLineText().size());
@@ -1266,8 +1264,16 @@ namespace Software::Modes::Slate
 
                 if (result.submitted)
                 {
-                    editor.SplitActiveLine();
-                    editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(), context.frame.elapsedSeconds);
+                    if (Software::Slate::PathUtils::Trim(editor.ActiveLineText()) == "/todo")
+                    {
+                        BeginTodoCreate(context);
+                    }
+                    else
+                    {
+                        editor.SplitActiveLine();
+                        editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(),
+                                                             context.frame.elapsedSeconds);
+                    }
                     ImGui::EndGroup();
                     ImGui::PopID();
                     break;
