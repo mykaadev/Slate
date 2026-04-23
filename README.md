@@ -374,6 +374,7 @@ cmake/
 
 <!-- GH_ONLY_START -->
 ## ❤️ Credits
+<a href="https://github.com/mykaadev/Slate/graphs/contributors"><img src="https://contrib.rocks/image?repo=mykaadev/Slate"/></a>
 Built with:
 - GLFW
 - Dear ImGui
