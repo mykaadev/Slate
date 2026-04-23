@@ -796,17 +796,31 @@ namespace Software::Modes::Slate
             ShowWorkspaceSetup(context);
             return;
         }
+        auto& workspace = WorkspaceContext(context);
+        auto& editor = EditorContext(context);
+        auto& documents = workspace.Documents();
 
-        EditorContext(context).CommitToActiveDocument(WorkspaceContext(context).Documents(), m_nowSeconds);
-        EditorContext(context).ReleaseNativeEditorFocus();
         std::string activeLine;
-        const bool hasActiveLine = EditorContext(context).ActiveLineText(&activeLine);
+        const bool hasActiveLine = editor.ActiveLineText(&activeLine);
+        const auto* active = documents.Active();
+        const std::size_t activeLineNumber =
+            editor.NativeEditorAvailable()
+                ? static_cast<std::size_t>(std::max(1, editor.NativeEditorScrollState().caretLine + 1))
+                : (editor.Editor().ActiveLine() + 1);
+
+        editor.CommitToActiveDocument(documents, m_nowSeconds);
+        editor.ReleaseNativeEditorFocus();
         m_todoForm = {};
         m_todoForm.open = true;
         m_todoForm.focusTitle = true;
         m_todoForm.mode = TodoFormMode::Create;
         m_todoForm.state = Software::Slate::TodoState::Open;
         m_todoForm.replaceActiveLine = hasActiveLine && Software::Slate::PathUtils::Trim(activeLine) == "/todo";
+        if (m_todoForm.replaceActiveLine && active)
+        {
+            m_todoForm.pendingCommandPath = Software::Slate::PathUtils::NormalizeRelative(active->relativePath);
+            m_todoForm.pendingCommandLine = activeLineNumber;
+        }
         m_todoForm.title = "Untitled todo";
     }
 
@@ -1251,6 +1265,8 @@ namespace Software::Modes::Slate
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
         ImGui::BeginChild("TodoOverlay", size, true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        const bool overlayHovered =
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         ImGui::TextColored(Amber, "todos");
         ImGui::SameLine();
         ImGui::TextColored(TodoFilterColor(m_todoStateFilter), "%s", TodoFilterLabel(m_todoStateFilter));
@@ -1303,12 +1319,23 @@ namespace Software::Modes::Slate
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
+
+        if (allowInput && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !overlayHovered)
+        {
+            m_todoOverlayOpen = false;
+            if (WantsNativeEditorVisible(context))
+            {
+                EditorContext(context).Editor().RequestFocus();
+                EditorContext(context).SetTextFocused(true);
+            }
+            return;
+        }
     }
 
     void SlateModeBase::DrawTodoFormOverlay(Software::Core::Runtime::AppContext& context)
     {
         const ImVec2 size(std::min(620.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.52f)),
-                          std::min(280.0f, std::max(220.0f, ImGui::GetWindowHeight() * 0.34f)));
+                          std::min(220.0f, std::max(176.0f, ImGui::GetWindowHeight() * 0.24f)));
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
@@ -1317,6 +1344,8 @@ namespace Software::Modes::Slate
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
         ImGui::BeginChild("TodoFormOverlay", size, true);
+        const bool formHovered =
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         ImGui::TextColored(Amber, "%s", m_todoForm.mode == TodoFormMode::Create ? "new todo" : "edit todo");
         ImGui::SameLine();
         ImGui::TextColored(TodoStateColor(m_todoForm.state),
@@ -1347,12 +1376,12 @@ namespace Software::Modes::Slate
         }
         if (IsKeyPressed(ImGuiKey_Escape))
         {
-            m_todoForm = {};
-            if (!m_todoOverlayOpen && WantsNativeEditorVisible(context))
-            {
-                EditorContext(context).Editor().RequestFocus();
-                EditorContext(context).SetTextFocused(true);
-            }
+            CancelTodoForm(context);
+            return;
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !formHovered)
+        {
+            CancelTodoForm(context);
             return;
         }
         if (titleResult.submitted || descriptionResult.submitted)
@@ -1625,6 +1654,137 @@ namespace Software::Modes::Slate
         m_todoForm.description = ticket.description;
     }
 
+    void SlateModeBase::CancelTodoForm(Software::Core::Runtime::AppContext& context)
+    {
+        if (m_todoForm.mode == TodoFormMode::Create && m_todoForm.replaceActiveLine)
+        {
+            RemovePendingTodoCommand(context);
+        }
+
+        m_todoForm = {};
+        if (!m_todoOverlayOpen && WantsNativeEditorVisible(context))
+        {
+            EditorContext(context).Editor().RequestFocus();
+            EditorContext(context).SetTextFocused(true);
+        }
+    }
+
+    bool SlateModeBase::RemovePendingTodoCommand(Software::Core::Runtime::AppContext& context)
+    {
+        auto& workspace = WorkspaceContext(context);
+        auto& documents = workspace.Documents();
+        auto& editor = EditorContext(context);
+        auto* active = documents.Active();
+        if (!active || m_todoForm.pendingCommandLine == 0)
+        {
+            return false;
+        }
+
+        if (!m_todoForm.pendingCommandPath.empty() &&
+            Software::Slate::PathUtils::NormalizeRelative(active->relativePath) != m_todoForm.pendingCommandPath)
+        {
+            return false;
+        }
+
+        const std::string lineEnding = active->lineEnding.empty()
+                                           ? Software::Slate::PathUtils::DetectLineEnding(active->text)
+                                           : active->lineEnding;
+        auto lines = Software::Slate::MarkdownService::SplitLines(active->text);
+        if (lines.empty())
+        {
+            return false;
+        }
+        const std::size_t removeIndex = std::min(m_todoForm.pendingCommandLine - 1, lines.size() - 1);
+        if (Software::Slate::PathUtils::Trim(lines[removeIndex]) != "/todo")
+        {
+            return false;
+        }
+
+        if (lines.size() == 1)
+        {
+            lines.front().clear();
+        }
+        else
+        {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(removeIndex));
+        }
+
+        std::string updatedText;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            if (i > 0)
+            {
+                updatedText += lineEnding;
+            }
+            updatedText += lines[i];
+        }
+
+        active->text = std::move(updatedText);
+        documents.MarkEdited(m_nowSeconds);
+        editor.LoadFromActiveDocument(documents);
+        editor.JumpToLine(std::min(removeIndex + 1, lines.size()));
+        return true;
+    }
+
+    
+    bool SlateModeBase::ReplacePendingTodoCommand(Software::Core::Runtime::AppContext& context, const std::string& block)
+    {
+        auto& workspace = WorkspaceContext(context);
+        auto& documents = workspace.Documents();
+        auto& editor = EditorContext(context);
+        auto* active = documents.Active();
+        if (!active || m_todoForm.pendingCommandLine == 0)
+        {
+            return false;
+        }
+
+        if (!m_todoForm.pendingCommandPath.empty() &&
+            Software::Slate::PathUtils::NormalizeRelative(active->relativePath) != m_todoForm.pendingCommandPath)
+        {
+            return false;
+        }
+
+        const std::string lineEnding = active->lineEnding.empty()
+                                           ? Software::Slate::PathUtils::DetectLineEnding(active->text)
+                                           : active->lineEnding;
+        auto lines = Software::Slate::MarkdownService::SplitLines(active->text);
+        if (lines.empty())
+        {
+            return false;
+        }
+
+        const std::size_t replaceIndex = std::min(m_todoForm.pendingCommandLine - 1, lines.size() - 1);
+        if (Software::Slate::PathUtils::Trim(lines[replaceIndex]) != "/todo")
+        {
+            return false;
+        }
+
+        auto replacement = Software::Slate::MarkdownService::SplitLines(block);
+        if (replacement.empty())
+        {
+            replacement.emplace_back();
+        }
+
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex));
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex), replacement.begin(), replacement.end());
+
+        std::string updatedText;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            if (i > 0)
+            {
+                updatedText += lineEnding;
+            }
+            updatedText += lines[i];
+        }
+
+        active->text = std::move(updatedText);
+        documents.MarkEdited(m_nowSeconds);
+        editor.LoadFromActiveDocument(documents);
+        editor.JumpToLine(replaceIndex + 1);
+        return true;
+    }
+
     bool SlateModeBase::AcceptTodoForm(Software::Core::Runtime::AppContext& context)
     {
         const auto state = m_todoForm.state;
@@ -1642,8 +1802,7 @@ namespace Software::Modes::Slate
             bool inserted = false;
             if (m_todoForm.replaceActiveLine)
             {
-                inserted = EditorContext(context).ReplaceActiveLineWithText(
-                    WorkspaceContext(context).Documents(), block, m_nowSeconds);
+                inserted = ReplacePendingTodoCommand(context, block);
             }
             else
             {

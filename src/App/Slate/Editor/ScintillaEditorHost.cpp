@@ -5,6 +5,7 @@
 #if defined(_WIN32)
 #define NOMINMAX
 #include <Windows.h>
+#include <shellapi.h>
 
 #include <SciLexer.h>
 #include <Scintilla.h>
@@ -679,6 +680,18 @@ namespace Software::Slate
         return hasCommand;
     }
 
+    bool ScintillaEditorHost::ConsumeDroppedFiles(std::vector<std::string>* files)
+    {
+        if (!files || m_pendingDroppedFiles.empty())
+        {
+            return false;
+        }
+
+        files->insert(files->end(), m_pendingDroppedFiles.begin(), m_pendingDroppedFiles.end());
+        m_pendingDroppedFiles.clear();
+        return true;
+    }
+
     bool ScintillaEditorHost::EnsureWindow()
     {
 #if defined(_WIN32)
@@ -718,6 +731,7 @@ namespace Software::Slate
         ::SetPropW(window, HostPropertyName, this);
         m_editorProc = reinterpret_cast<void*>(::SetWindowLongPtrW(
             window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&ScintillaEditorHost::EditorWindowProc)));
+        ::DragAcceptFiles(window, TRUE);
 
         ConfigureEditor();
         SetVisible(m_visible);
@@ -1042,7 +1056,10 @@ namespace Software::Slate
                 return 0;
             }
             if (m_editorSettings.pasteClipboardImages &&
-                ctrlPressed && (wParam == 'V' || wParam == 'v') && ::IsClipboardFormatAvailable(CF_DIB) != 0)
+                ctrlPressed && (wParam == 'V' || wParam == 'v') &&
+                (::IsClipboardFormatAvailable(CF_DIBV5) != 0 ||
+                 ::IsClipboardFormatAvailable(CF_DIB) != 0 ||
+                 ::IsClipboardFormatAvailable(CF_BITMAP) != 0))
             {
                 m_pendingCommands |= CommandMask(NativeEditorCommand::PasteClipboardImage);
                 return 0;
@@ -1075,6 +1092,21 @@ namespace Software::Slate
             {
                 return 0;
             }
+        }
+        else if (message == WM_DROPFILES)
+        {
+            const HDROP drop = reinterpret_cast<HDROP>(wParam);
+            const UINT fileCount = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT index = 0; index < fileCount; ++index)
+            {
+                const UINT length = ::DragQueryFileW(drop, index, nullptr, 0);
+                std::wstring path(length + 1, L'\0');
+                ::DragQueryFileW(drop, index, path.data(), length + 1);
+                path.resize(length);
+                m_pendingDroppedFiles.push_back(fs::path(path).string());
+            }
+            ::DragFinish(drop);
+            return 0;
         }
 
         return ::CallWindowProcW(reinterpret_cast<WNDPROC>(m_editorProc),

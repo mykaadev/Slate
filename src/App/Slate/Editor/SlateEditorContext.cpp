@@ -263,7 +263,17 @@ namespace Software::Slate
     int SlateEditorContext::ProcessDroppedFiles(std::vector<std::string>* droppedFiles, DocumentService& documents,
                                                 AssetService& assets, double elapsedSeconds, std::string* error)
     {
-        if (!droppedFiles || droppedFiles->empty())
+        std::vector<std::string> pendingDrops;
+        if (droppedFiles && !droppedFiles->empty())
+        {
+            pendingDrops.insert(pendingDrops.end(), droppedFiles->begin(), droppedFiles->end());
+            droppedFiles->clear();
+        }
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->ConsumeDroppedFiles(&pendingDrops);
+        }
+        if (pendingDrops.empty())
         {
             return 0;
         }
@@ -275,13 +285,12 @@ namespace Software::Slate
             {
                 *error = "open a note before dropping image files";
             }
-            droppedFiles->clear();
             return 0;
         }
 
         int inserted = 0;
         std::string lastError;
-        for (const auto& pathText : *droppedFiles)
+        for (const auto& pathText : pendingDrops)
         {
             fs::path assetRelative;
             std::string itemError;
@@ -299,7 +308,6 @@ namespace Software::Slate
             }
         }
 
-        droppedFiles->clear();
         if (error)
         {
             *error = std::move(lastError);

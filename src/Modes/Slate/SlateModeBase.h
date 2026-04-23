@@ -192,6 +192,10 @@ namespace Software::Modes::Slate
             bool focusTitle = false;
             // Marks whether the current editor line should be replaced
             bool replaceActiveLine = false;
+            // Stores the source document for a pending slash command
+            Software::Slate::fs::path pendingCommandPath;
+            // Stores the 1-based source line for a pending slash command
+            std::size_t pendingCommandLine = 0;
             // Stores whether the form is creating or editing
             TodoFormMode mode = TodoFormMode::Create;
             // Stores the ticket being edited
@@ -228,6 +232,12 @@ namespace Software::Modes::Slate
         void OpenSelectedSearchResult(Software::Core::Runtime::AppContext& context);
         // Starts editing one todo
         void BeginTodoEdit(const Software::Slate::TodoTicket& ticket);
+        // Cancels the current todo form
+        void CancelTodoForm(Software::Core::Runtime::AppContext& context);
+        // Removes a pending slash todo command line
+        bool RemovePendingTodoCommand(Software::Core::Runtime::AppContext& context);
+        // Replaces a pending slash todo command line with a todo block
+        bool ReplacePendingTodoCommand(Software::Core::Runtime::AppContext& context, const std::string& block);
         // Saves the current todo form
         bool AcceptTodoForm(Software::Core::Runtime::AppContext& context);
         // Rewrites one todo inside its source document

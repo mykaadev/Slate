@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Software::Slate
 {
@@ -90,6 +91,8 @@ namespace Software::Slate
 
         // Consumes one pending command bit
         bool ConsumeCommand(NativeEditorCommand command);
+        // Consumes file paths dropped on the native editor
+        bool ConsumeDroppedFiles(std::vector<std::string>* files);
 
     private:
         // Creates the editor window on demand
@@ -137,6 +140,8 @@ namespace Software::Slate
         bool m_visible = false;
         // Stores pending command bits
         std::uint32_t m_pendingCommands = 0;
+        // Stores file paths dropped on the native editor
+        std::vector<std::string> m_pendingDroppedFiles;
         // Stores the last x position
         int m_lastX = 0;
         // Stores the last y position

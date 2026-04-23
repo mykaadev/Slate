@@ -3,6 +3,7 @@
 #include "App/Slate/Core/PathUtils.h"
 
 #include <fstream>
+#include <vector>
 #include <utility>
 
 #if defined(_WIN32)
@@ -12,6 +13,158 @@
 
 namespace Software::Slate
 {
+    namespace
+    {
+#if defined(_WIN32)
+        bool ClipboardHasImageFormat()
+        {
+            return IsClipboardFormatAvailable(CF_DIBV5) != 0 ||
+                   IsClipboardFormatAvailable(CF_DIB) != 0 ||
+                   IsClipboardFormatAvailable(CF_BITMAP) != 0;
+        }
+
+        HANDLE FirstClipboardDibHandle()
+        {
+            if (IsClipboardFormatAvailable(CF_DIBV5) != 0)
+            {
+                return GetClipboardData(CF_DIBV5);
+            }
+            if (IsClipboardFormatAvailable(CF_DIB) != 0)
+            {
+                return GetClipboardData(CF_DIB);
+            }
+            return nullptr;
+        }
+
+        bool WriteBitmapFileFromDibHandle(HANDLE handle, const fs::path& absolutePath, std::string* error)
+        {
+            if (!handle)
+            {
+                if (error)
+                {
+                    *error = "Could not read clipboard image.";
+                }
+                return false;
+            }
+
+            const auto* dib = static_cast<const unsigned char*>(GlobalLock(handle));
+            const SIZE_T dibSize = GlobalSize(handle);
+            if (!dib || dibSize < sizeof(BITMAPINFOHEADER))
+            {
+                if (dib)
+                {
+                    GlobalUnlock(handle);
+                }
+                if (error)
+                {
+                    *error = "Clipboard image is not a DIB bitmap.";
+                }
+                return false;
+            }
+
+            const auto* header = reinterpret_cast<const BITMAPINFOHEADER*>(dib);
+            DWORD colorCount = header->biClrUsed;
+            if (colorCount == 0 && header->biBitCount <= 8)
+            {
+                colorCount = 1u << header->biBitCount;
+            }
+
+            DWORD maskBytes = 0;
+            if (header->biCompression == BI_BITFIELDS && header->biSize == sizeof(BITMAPINFOHEADER))
+            {
+                maskBytes = 3u * sizeof(DWORD);
+            }
+
+            const DWORD pixelOffset = header->biSize + maskBytes + colorCount * sizeof(RGBQUAD);
+            BITMAPFILEHEADER fileHeader{};
+            fileHeader.bfType = 0x4D42;
+            fileHeader.bfOffBits = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + pixelOffset);
+            fileHeader.bfSize = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + dibSize);
+
+            std::ofstream file(absolutePath, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
+            file.write(reinterpret_cast<const char*>(dib), static_cast<std::streamsize>(dibSize));
+            const bool ok = static_cast<bool>(file);
+            GlobalUnlock(handle);
+
+            if (!ok && error)
+            {
+                *error = "Could not write pasted image.";
+            }
+            return ok;
+        }
+
+        bool WriteBitmapFileFromBitmapHandle(HBITMAP bitmapHandle, const fs::path& absolutePath, std::string* error)
+        {
+            if (!bitmapHandle)
+            {
+                if (error)
+                {
+                    *error = "Could not read clipboard image.";
+                }
+                return false;
+            }
+
+            BITMAP bitmap{};
+            if (GetObjectW(bitmapHandle, sizeof(bitmap), &bitmap) == 0)
+            {
+                if (error)
+                {
+                    *error = "Could not inspect clipboard bitmap.";
+                }
+                return false;
+            }
+
+            BITMAPINFOHEADER header{};
+            header.biSize = sizeof(BITMAPINFOHEADER);
+            header.biWidth = bitmap.bmWidth;
+            header.biHeight = bitmap.bmHeight;
+            header.biPlanes = 1;
+            header.biBitCount = 32;
+            header.biCompression = BI_RGB;
+
+            const DWORD imageSize = static_cast<DWORD>(bitmap.bmWidth * bitmap.bmHeight * 4);
+            std::vector<unsigned char> pixels(imageSize);
+
+            BITMAPINFO info{};
+            info.bmiHeader = header;
+            HDC deviceContext = GetDC(nullptr);
+            const int copied = GetDIBits(deviceContext,
+                                         bitmapHandle,
+                                         0,
+                                         static_cast<UINT>(bitmap.bmHeight),
+                                         pixels.data(),
+                                         &info,
+                                         DIB_RGB_COLORS);
+            ReleaseDC(nullptr, deviceContext);
+            if (copied == 0)
+            {
+                if (error)
+                {
+                    *error = "Could not copy clipboard bitmap.";
+                }
+                return false;
+            }
+
+            BITMAPFILEHEADER fileHeader{};
+            fileHeader.bfType = 0x4D42;
+            fileHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+            fileHeader.bfSize = fileHeader.bfOffBits + imageSize;
+
+            std::ofstream file(absolutePath, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
+            file.write(reinterpret_cast<const char*>(&info.bmiHeader), sizeof(info.bmiHeader));
+            file.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const bool ok = static_cast<bool>(file);
+            if (!ok && error)
+            {
+                *error = "Could not write pasted image.";
+            }
+            return ok;
+        }
+#endif
+    }
+
     AssetService::AssetService(fs::path workspaceRoot)
         : m_workspaceRoot(std::move(workspaceRoot))
     {
@@ -73,7 +226,7 @@ namespace Software::Slate
     bool AssetService::HasClipboardImage() const
     {
 #if defined(_WIN32)
-        return IsClipboardFormatAvailable(CF_DIB) != 0;
+        return ClipboardHasImageFormat();
 #else
         return false;
 #endif
@@ -101,59 +254,12 @@ namespace Software::Slate
             return false;
         }
 
-        HANDLE handle = GetClipboardData(CF_DIB);
-        if (!handle)
-        {
-            CloseClipboard();
-            if (error)
-            {
-                *error = "Could not read clipboard image.";
-            }
-            return false;
-        }
-
-        const auto* dib = static_cast<const unsigned char*>(GlobalLock(handle));
-        const SIZE_T dibSize = GlobalSize(handle);
-        if (!dib || dibSize < sizeof(BITMAPINFOHEADER))
-        {
-            if (dib)
-            {
-                GlobalUnlock(handle);
-            }
-            CloseClipboard();
-            if (error)
-            {
-                *error = "Clipboard image is not a DIB bitmap.";
-            }
-            return false;
-        }
-
-        const auto* header = reinterpret_cast<const BITMAPINFOHEADER*>(dib);
-        DWORD colorCount = header->biClrUsed;
-        if (colorCount == 0 && header->biBitCount <= 8)
-        {
-            colorCount = 1u << header->biBitCount;
-        }
-
-        DWORD maskBytes = 0;
-        if (header->biCompression == BI_BITFIELDS && header->biSize == sizeof(BITMAPINFOHEADER))
-        {
-            maskBytes = 3u * sizeof(DWORD);
-        }
-
-        const DWORD pixelOffset = header->biSize + maskBytes + colorCount * sizeof(RGBQUAD);
-        BITMAPFILEHEADER fileHeader{};
-        fileHeader.bfType = 0x4D42;
-        fileHeader.bfOffBits = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + pixelOffset);
-        fileHeader.bfSize = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + dibSize);
-
         const fs::path relative = AssetRelativePathForExtension(noteRelativePath, "clipboard", ".bmp");
         const fs::path absolute = m_workspaceRoot / relative;
         std::error_code ec;
         fs::create_directories(absolute.parent_path(), ec);
         if (ec)
         {
-            GlobalUnlock(handle);
             CloseClipboard();
             if (error)
             {
@@ -162,20 +268,20 @@ namespace Software::Slate
             return false;
         }
 
-        std::ofstream file(absolute, std::ios::binary | std::ios::trunc);
-        file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
-        file.write(reinterpret_cast<const char*>(dib), static_cast<std::streamsize>(dibSize));
-        const bool ok = static_cast<bool>(file);
-
-        GlobalUnlock(handle);
+        const HANDLE dibHandle = FirstClipboardDibHandle();
+        bool ok = false;
+        if (dibHandle)
+        {
+            ok = WriteBitmapFileFromDibHandle(dibHandle, absolute, error);
+        }
+        else
+        {
+            ok = WriteBitmapFileFromBitmapHandle(static_cast<HBITMAP>(GetClipboardData(CF_BITMAP)), absolute, error);
+        }
         CloseClipboard();
 
         if (!ok)
         {
-            if (error)
-            {
-                *error = "Could not write pasted image.";
-            }
             return false;
         }
 
