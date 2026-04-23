@@ -1,7 +1,9 @@
 <!-- GH_ONLY_START -->
 <h1 align="center">
   <br>
-  Slate
+  <a href="https://github.com/mykaadev/Slate">
+    <img src="https://github.com/mykaadev/Slate/blob/main/resources/Icon.png" alt="Slate" width="160">
+  </a>
 </h1>
 
 <h4 align="center">A quiet local-first text editor for Markdown, todo lists, and daily journaling</h4>
@@ -41,6 +43,10 @@ Slate is intentionally small:
 - **local-first** instead of account-first,
 - **plain files** instead of a locked database,
 - **focused UI** instead of a giant workspace operating system.
+
+<div align="center">
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/LandingPage.png" width="700" alt="Landing Page" />
+</div>
 
 Default idea:
 - write notes,
@@ -165,6 +171,10 @@ Examples:
 ### Journal flow
 Press `j` to open or create today’s daily note.
 
+<div align="center">
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/journal.png" width="700" alt="Landing Page" />
+</div>
+
 New daily entries start with:
 
 ```md
@@ -179,8 +189,14 @@ Slate also builds a month summary for journaling and includes a rotating reflect
 Slate treats todos as part of your Markdown workflow.
 A todo block looks like this:
 
+Easily created by using `/todo`
+
+<div align="center">
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/todos.png" width="700" alt="Landing Page" />
+</div>
+
 ```md
-- [ ] #todo [Open] Finish README polish
+#todo [Open] Finish README polish
   tighten summary section
   add screenshot
 ```
@@ -214,6 +230,10 @@ Slate stores per-workspace settings in plain files:
 .slate/editor.tsv
 .slate/theme.tsv
 ```
+
+<div align="center">
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/settings.png" width="700" alt="Landing Page" />
+</div>
 
 These cover things like:
 - font size
@@ -375,6 +395,7 @@ cmake/
 <!-- GH_ONLY_START -->
 ## ❤️ Credits
 <a href="https://github.com/mykaadev/Slate/graphs/contributors"><img src="https://contrib.rocks/image?repo=mykaadev/Slate"/></a>
+<br>
 Built with:
 - GLFW
 - Dear ImGui
