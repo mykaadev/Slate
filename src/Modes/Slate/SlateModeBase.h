@@ -61,7 +61,9 @@ namespace Software::Modes::Slate
         void CloseSearchOverlay();
 
         bool SaveActiveDocument(Software::Core::Runtime::AppContext& context);
-        bool OpenDocument(const Software::Slate::fs::path& relativePath, Software::Core::Runtime::AppContext& context);
+        bool OpenDocument(const Software::Slate::fs::path& relativePath, Software::Core::Runtime::AppContext& context,
+                          bool recordHistory = true);
+        bool NavigateDocumentHistory(Software::Core::Runtime::AppContext& context, int delta);
         bool OpenWorkspace(const Software::Slate::fs::path& root, Software::Core::Runtime::AppContext& context);
         bool OpenVault(const Software::Slate::WorkspaceVault& vault, Software::Core::Runtime::AppContext& context);
         bool OpenTodayJournal(Software::Core::Runtime::AppContext& context);
@@ -109,7 +111,7 @@ namespace Software::Modes::Slate
             ConfirmCallback callback;
         };
 
-        void DrawRootBegin();
+        void DrawRootBegin(Software::Core::Runtime::AppContext& context);
         void DrawSearchOverlay(Software::Core::Runtime::AppContext& context);
         void DrawPromptOverlay(Software::Core::Runtime::AppContext& context);
         void DrawConfirmOverlay(Software::Core::Runtime::AppContext& context);

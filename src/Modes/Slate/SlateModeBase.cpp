@@ -40,7 +40,7 @@ namespace Software::Modes::Slate
         HandleGlobalKeys(context);
         EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context));
 
-        DrawRootBegin();
+        DrawRootBegin(context);
 
         const bool handleInput = !m_helpOpen && !m_prompt.open && !m_confirm.open && !m_searchOverlayOpen;
         if (m_helpOpen)
@@ -67,8 +67,8 @@ namespace Software::Modes::Slate
 
         DrawStatusLine(context);
         ImGui::End();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(5);
+        ImGui::PopStyleVar(4);
+        ImGui::PopStyleColor(12);
     }
 
     bool SlateModeBase::WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const
@@ -224,7 +224,8 @@ namespace Software::Modes::Slate
     }
 
     bool SlateModeBase::OpenDocument(const Software::Slate::fs::path& relativePath,
-                                     Software::Core::Runtime::AppContext& context)
+                                     Software::Core::Runtime::AppContext& context,
+                                     bool recordHistory)
     {
         auto& workspace = WorkspaceContext(context);
         auto& editor = EditorContext(context);
@@ -250,6 +251,22 @@ namespace Software::Modes::Slate
         ui.folderPickerActive = false;
         ui.folderPickerAction = Software::Slate::FolderPickerAction::None;
         CloseSearchOverlay();
+
+        if (recordHistory)
+        {
+            const auto normalized = Software::Slate::PathUtils::NormalizeRelative(relativePath);
+            if (ui.documentHistoryIndex + 1 < static_cast<int>(ui.documentHistory.size()))
+            {
+                ui.documentHistory.erase(ui.documentHistory.begin() + ui.documentHistoryIndex + 1,
+                                         ui.documentHistory.end());
+            }
+            if (ui.documentHistory.empty() || ui.documentHistory.back() != normalized)
+            {
+                ui.documentHistory.push_back(normalized);
+            }
+            ui.documentHistoryIndex = static_cast<int>(ui.documentHistory.size()) - 1;
+        }
+
         SetStatus("opened " + relativePath.generic_string());
         ActivateMode(Software::Slate::ModeIds::Editor, context);
 
@@ -288,6 +305,37 @@ namespace Software::Modes::Slate
                          "restore", "discard", "later");
         }
 
+        return true;
+    }
+
+    bool SlateModeBase::NavigateDocumentHistory(Software::Core::Runtime::AppContext& context, int delta)
+    {
+        auto& ui = UiState(context);
+        if (delta == 0 || ui.documentHistory.empty())
+        {
+            return false;
+        }
+
+        if (ui.documentHistoryIndex < 0)
+        {
+            ui.documentHistoryIndex = static_cast<int>(ui.documentHistory.size()) - 1;
+        }
+
+        const int nextIndex = ui.documentHistoryIndex + delta;
+        if (nextIndex < 0 || nextIndex >= static_cast<int>(ui.documentHistory.size()))
+        {
+            SetStatus(delta < 0 ? "no previous note" : "no next note");
+            return false;
+        }
+
+        const auto target = ui.documentHistory[static_cast<std::size_t>(nextIndex)];
+        if (!OpenDocument(target, context, false))
+        {
+            return false;
+        }
+
+        ui.documentHistoryIndex = nextIndex;
+        SetStatus(std::string(delta < 0 ? "back: " : "forward: ") + target.generic_string());
         return true;
     }
 
@@ -595,8 +643,12 @@ namespace Software::Modes::Slate
         return m_searchMode;
     }
 
-    void SlateModeBase::DrawRootBegin()
+    void SlateModeBase::DrawRootBegin(Software::Core::Runtime::AppContext& context)
     {
+        const auto& workspace = WorkspaceContext(context);
+        const int scrollbarStyle = workspace.HasWorkspaceLoaded()
+                                       ? workspace.CurrentEditorSettings().scrollbarStyle
+                                       : 1;
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->Pos);
         ImGui::SetNextWindowSize(viewport->Size);
@@ -606,7 +658,11 @@ namespace Software::Modes::Slate
         ImGui::PushStyleColor(ImGuiCol_FrameBg, Panel);
         ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Panel);
         ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(Muted.x, Muted.y, Muted.z, 0.34f));
+        ImGui::PushStyleColor(ImGuiCol_SeparatorHovered, ImVec4(Amber.x, Amber.y, Amber.z, 0.42f));
+        ImGui::PushStyleColor(ImGuiCol_SeparatorActive, ImVec4(Green.x, Green.y, Green.z, 0.50f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28.0f, 24.0f));
+        PushSlateScrollbarStyle(scrollbarStyle);
         ImGui::Begin("SlateRoot", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking);
@@ -660,10 +716,15 @@ namespace Software::Modes::Slate
             return;
         }
 
-        const ImVec2 size(ImGui::GetWindowWidth() * 0.72f, ImGui::GetWindowHeight() * 0.58f);
+        const ImVec2 size(std::min(760.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.58f)),
+                          std::min(520.0f, std::max(280.0f, ImGui::GetWindowHeight() * 0.52f)));
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
         ImGui::BeginChild("SearchOverlay", size, true);
         const bool documentFind = m_searchOverlayScope == SearchOverlayScope::Document;
         ImGui::TextColored(Cyan, "%s", documentFind ? "find in file" : "search");
@@ -716,14 +777,19 @@ namespace Software::Modes::Slate
             }
         }
         ImGui::EndChild();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
     }
 
     void SlateModeBase::DrawPromptOverlay(Software::Core::Runtime::AppContext& context)
     {
-        const ImVec2 size(ImGui::GetWindowWidth() * 0.72f, 92.0f);
+        const ImVec2 size(std::min(560.0f, std::max(320.0f, ImGui::GetWindowWidth() * 0.50f)), 104.0f);
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, ImGui::GetWindowHeight() - 150.0f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
         ImGui::BeginChild("PromptOverlay", size, true);
         ImGui::TextColored(Cyan, "%s", m_prompt.title.c_str());
         ImGui::SetNextItemWidth(-1.0f);
@@ -744,7 +810,8 @@ namespace Software::Modes::Slate
             }
         }
         ImGui::EndChild();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
 
         if (IsKeyPressed(ImGuiKey_Escape))
         {
@@ -754,10 +821,14 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::DrawConfirmOverlay(Software::Core::Runtime::AppContext& context)
     {
-        const ImVec2 size(ImGui::GetWindowWidth() * 0.62f, 118.0f);
+        const ImVec2 size(std::min(520.0f, std::max(320.0f, ImGui::GetWindowWidth() * 0.46f)), 128.0f);
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
         ImGui::BeginChild("ConfirmOverlay", size, true);
         ImGui::Dummy(ImVec2(1.0f, 18.0f));
         TextCentered(m_confirm.message.c_str(), m_confirm.destructive ? Red : Amber);
@@ -771,7 +842,8 @@ namespace Software::Modes::Slate
         actions += "   (esc) " + m_confirm.cancelLabel;
         DrawShortcutTextCentered(actions);
         ImGui::EndChild();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
 
         if (IsKeyPressed(ImGuiKey_Y) || IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
         {
@@ -851,6 +923,8 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::HandleGlobalKeys(Software::Core::Runtime::AppContext& context)
     {
+        const ImGuiIO& io = ImGui::GetIO();
+
         if (IsCtrlPressed(ImGuiKey_S))
         {
             SaveActiveDocument(context);
@@ -870,7 +944,17 @@ namespace Software::Modes::Slate
             return;
         }
 
-        const ImGuiIO& io = ImGui::GetIO();
+        if (io.KeyAlt && IsKeyPressed(ImGuiKey_LeftArrow))
+        {
+            NavigateDocumentHistory(context, -1);
+            return;
+        }
+        if (io.KeyAlt && IsKeyPressed(ImGuiKey_RightArrow))
+        {
+            NavigateDocumentHistory(context, 1);
+            return;
+        }
+
         if (EditorContext(context).IsTextFocused() || io.WantTextInput)
         {
             return;

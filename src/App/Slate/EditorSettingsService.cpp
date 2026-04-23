@@ -59,6 +59,10 @@ namespace Software::Slate
                     {
                         SettingsFile::ParseBool(value, &settings.wordWrap);
                     }
+                    else if (key == "show_whitespace")
+                    {
+                        SettingsFile::ParseBool(value, &settings.showWhitespace);
+                    }
                     else if (key == "highlight_current_line")
                     {
                         SettingsFile::ParseBool(value, &settings.highlightCurrentLine);
@@ -66,6 +70,38 @@ namespace Software::Slate
                     else if (key == "tab_width")
                     {
                         SettingsFile::ParseInt(value, &settings.tabWidth);
+                    }
+                    else if (key == "panel_layout")
+                    {
+                        SettingsFile::ParseInt(value, &settings.panelLayout);
+                    }
+                    else if (key == "preview_render_mode")
+                    {
+                        SettingsFile::ParseInt(value, &settings.previewRenderMode);
+                    }
+                    else if (key == "preview_follow_mode")
+                    {
+                        SettingsFile::ParseInt(value, &settings.previewFollowMode);
+                    }
+                    else if (key == "panel_motion")
+                    {
+                        SettingsFile::ParseInt(value, &settings.panelMotion);
+                    }
+                    else if (key == "scroll_motion")
+                    {
+                        SettingsFile::ParseInt(value, &settings.scrollMotion);
+                    }
+                    else if (key == "scrollbar_style")
+                    {
+                        SettingsFile::ParseInt(value, &settings.scrollbarStyle);
+                    }
+                    else if (key == "caret_motion")
+                    {
+                        SettingsFile::ParseInt(value, &settings.caretMotion);
+                    }
+                    else if (key == "link_underline")
+                    {
+                        SettingsFile::ParseBool(value, &settings.linkUnderline);
                     }
                     else if (key == "indent_with_tabs")
                     {
@@ -137,8 +173,17 @@ namespace Software::Slate
         file << "line_spacing\t" << SettingsFile::SerializeInt(sanitized.lineSpacing) << '\n';
         file << "page_width\t" << SettingsFile::SerializeInt(sanitized.pageWidth) << '\n';
         file << "word_wrap\t" << SettingsFile::SerializeBool(sanitized.wordWrap) << '\n';
+        file << "show_whitespace\t" << SettingsFile::SerializeBool(sanitized.showWhitespace) << '\n';
         file << "highlight_current_line\t" << SettingsFile::SerializeBool(sanitized.highlightCurrentLine) << '\n';
         file << "tab_width\t" << SettingsFile::SerializeInt(sanitized.tabWidth) << '\n';
+        file << "panel_layout\t" << SettingsFile::SerializeInt(sanitized.panelLayout) << '\n';
+        file << "preview_render_mode\t" << SettingsFile::SerializeInt(sanitized.previewRenderMode) << '\n';
+        file << "preview_follow_mode\t" << SettingsFile::SerializeInt(sanitized.previewFollowMode) << '\n';
+        file << "panel_motion\t" << SettingsFile::SerializeInt(sanitized.panelMotion) << '\n';
+        file << "scroll_motion\t" << SettingsFile::SerializeInt(sanitized.scrollMotion) << '\n';
+        file << "scrollbar_style\t" << SettingsFile::SerializeInt(sanitized.scrollbarStyle) << '\n';
+        file << "caret_motion\t" << SettingsFile::SerializeInt(sanitized.caretMotion) << '\n';
+        file << "link_underline\t" << SettingsFile::SerializeBool(sanitized.linkUnderline) << '\n';
         file << "indent_with_tabs\t" << SettingsFile::SerializeBool(sanitized.indentWithTabs) << '\n';
         file << "auto_list_continuation\t" << SettingsFile::SerializeBool(sanitized.autoListContinuation) << '\n';
         file << "paste_clipboard_images\t" << SettingsFile::SerializeBool(sanitized.pasteClipboardImages) << '\n';
@@ -154,9 +199,16 @@ namespace Software::Slate
     {
         EditorSettings sanitized = settings;
         sanitized.fontSize = std::clamp(sanitized.fontSize, 12, 24);
-        sanitized.lineSpacing = std::clamp(sanitized.lineSpacing, 0, 8);
+        sanitized.lineSpacing = std::clamp(sanitized.lineSpacing, 0, 12);
         sanitized.pageWidth = sanitized.pageWidth == 0 ? 0 : std::clamp(sanitized.pageWidth, 560, 1400);
         sanitized.tabWidth = std::clamp(sanitized.tabWidth, 2, 8);
+        sanitized.panelLayout = std::clamp(sanitized.panelLayout, 0, 1);
+        sanitized.previewRenderMode = 0;
+        sanitized.previewFollowMode = std::clamp(sanitized.previewFollowMode, 0, 3);
+        sanitized.panelMotion = std::clamp(sanitized.panelMotion, 0, 3);
+        sanitized.scrollMotion = std::clamp(sanitized.scrollMotion, 0, 2);
+        sanitized.scrollbarStyle = std::clamp(sanitized.scrollbarStyle, 0, 2);
+        sanitized.caretMotion = std::clamp(sanitized.caretMotion, 0, 2);
         return sanitized;
     }
 }

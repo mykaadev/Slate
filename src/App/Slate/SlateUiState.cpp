@@ -7,9 +7,22 @@ namespace Software::Slate
         workspaceView = SlateWorkspaceView::Switcher;
         browserView = SlateBrowserView::FileTree;
         editorView = SlateEditorView::Document;
+        outlinePanelOpen = false;
+        previewPanelOpen = false;
+        outlinePanelProgress = 0.0f;
+        previewPanelProgress = 0.0f;
+        previewScrollY = 0.0f;
+        previewScrollTargetY = 0.0f;
+        previewManualScrollUntil = 0.0;
+        previewLastFollowLine = -1;
+        nativeEditorScrollLine = 0.0f;
+        nativeEditorScrollTargetLine = 0.0f;
+        nativeEditorScrollTargetActive = false;
 
         navigation.Reset();
         workspaceNavigation.Reset();
+        documentHistory.clear();
+        documentHistoryIndex = -1;
 
         pendingPath.clear();
         pendingTargetPath.clear();

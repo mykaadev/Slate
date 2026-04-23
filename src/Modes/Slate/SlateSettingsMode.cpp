@@ -25,8 +25,16 @@ namespace Software::Modes::Slate
             LineSpacing,
             PageWidth,
             WordWrap,
+            ShowWhitespace,
             CaretLine,
             TabWidth,
+            PanelLayout,
+            PreviewFollow,
+            PanelMotion,
+            ScrollMotion,
+            ScrollbarStyle,
+            CaretMotion,
+            LinkUnderline,
             IndentMode,
             AutoListContinuation,
             PasteClipboardImages,
@@ -51,13 +59,14 @@ namespace Software::Modes::Slate
             return options;
         }
 
-        const std::array<NamedIntOption, 4>& LineSpacingOptions()
+        const std::array<NamedIntOption, 5>& LineSpacingOptions()
         {
-            static constexpr std::array<NamedIntOption, 4> options{{
-                {1, "tight"},
+            static constexpr std::array<NamedIntOption, 5> options{{
+                {0, "tight"},
                 {2, "compact"},
                 {3, "balanced"},
-                {5, "relaxed"},
+                {7, "relaxed"},
+                {11, "airy"},
             }};
             return options;
         }
@@ -78,6 +87,67 @@ namespace Software::Modes::Slate
             static constexpr std::array<NamedIntOption, 2> options{{
                 {2, "2 spaces"},
                 {4, "4 spaces"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 2>& PanelLayoutOptions()
+        {
+            static constexpr std::array<NamedIntOption, 2> options{{
+                {0, "margins"},
+                {1, "split"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 4>& PreviewFollowOptions()
+        {
+            static constexpr std::array<NamedIntOption, 4> options{{
+                {0, "manual"},
+                {1, "caret"},
+                {2, "scroll"},
+                {3, "mixed"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 4>& PanelMotionOptions()
+        {
+            static constexpr std::array<NamedIntOption, 4> options{{
+                {0, "instant"},
+                {1, "quick"},
+                {2, "smooth"},
+                {3, "floaty"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 3>& ScrollMotionOptions()
+        {
+            static constexpr std::array<NamedIntOption, 3> options{{
+                {0, "instant"},
+                {1, "smooth"},
+                {2, "glide"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 3>& ScrollbarStyleOptions()
+        {
+            static constexpr std::array<NamedIntOption, 3> options{{
+                {0, "slim"},
+                {1, "soft"},
+                {2, "bold"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 3>& CaretMotionOptions()
+        {
+            static constexpr std::array<NamedIntOption, 3> options{{
+                {0, "crisp"},
+                {1, "calm"},
+                {2, "anchored"},
             }};
             return options;
         }
@@ -232,6 +302,11 @@ namespace Software::Modes::Slate
                     workspace.SetEditorSettings(editorSettings);
                     saveEditor();
                     break;
+                case SettingsRow::ShowWhitespace:
+                    editorSettings.showWhitespace = !editorSettings.showWhitespace;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
                 case SettingsRow::CaretLine:
                     editorSettings.highlightCurrentLine = !editorSettings.highlightCurrentLine;
                     workspace.SetEditorSettings(editorSettings);
@@ -239,6 +314,43 @@ namespace Software::Modes::Slate
                     break;
                 case SettingsRow::TabWidth:
                     editorSettings.tabWidth = CycleNamedOption(TabWidthOptions(), editorSettings.tabWidth, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::PanelLayout:
+                    editorSettings.panelLayout = CycleNamedOption(PanelLayoutOptions(), editorSettings.panelLayout, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::PreviewFollow:
+                    editorSettings.previewFollowMode =
+                        CycleNamedOption(PreviewFollowOptions(), editorSettings.previewFollowMode, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::PanelMotion:
+                    editorSettings.panelMotion = CycleNamedOption(PanelMotionOptions(), editorSettings.panelMotion, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::ScrollMotion:
+                    editorSettings.scrollMotion = CycleNamedOption(ScrollMotionOptions(), editorSettings.scrollMotion, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::ScrollbarStyle:
+                    editorSettings.scrollbarStyle =
+                        CycleNamedOption(ScrollbarStyleOptions(), editorSettings.scrollbarStyle, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::CaretMotion:
+                    editorSettings.caretMotion = CycleNamedOption(CaretMotionOptions(), editorSettings.caretMotion, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::LinkUnderline:
+                    editorSettings.linkUnderline = !editorSettings.linkUnderline;
                     workspace.SetEditorSettings(editorSettings);
                     saveEditor();
                     break;
@@ -282,6 +394,10 @@ namespace Software::Modes::Slate
         const auto editorSettings = workspace.CurrentEditorSettings();
         ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
 
+        const float contentHeight = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
+        ImGui::BeginChild("SettingsScroll", ImVec2(0.0f, contentHeight), false,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
         ImGui::TextColored(Cyan, "settings");
         ImGui::Separator();
         ImGui::TextColored(Muted, "Appearance presets are file-backed. Add your own in .slate/presets/.");
@@ -305,10 +421,26 @@ namespace Software::Modes::Slate
                        "page width", LabelForNamedOption(PageWidthOptions(), editorSettings.pageWidth));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::WordWrap),
                        "word wrap", OnOffLabel(editorSettings.wordWrap));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::ShowWhitespace),
+                       "whitespace", OnOffLabel(editorSettings.showWhitespace));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::CaretLine),
                        "caret line", OnOffLabel(editorSettings.highlightCurrentLine));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::TabWidth),
                        "tab width", LabelForNamedOption(TabWidthOptions(), editorSettings.tabWidth));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PanelLayout),
+                       "side panels", LabelForNamedOption(PanelLayoutOptions(), editorSettings.panelLayout));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PreviewFollow),
+                       "preview sync", LabelForNamedOption(PreviewFollowOptions(), editorSettings.previewFollowMode));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PanelMotion),
+                       "panel motion", LabelForNamedOption(PanelMotionOptions(), editorSettings.panelMotion));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::ScrollMotion),
+                       "scroll motion", LabelForNamedOption(ScrollMotionOptions(), editorSettings.scrollMotion));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::ScrollbarStyle),
+                       "scrollbars", LabelForNamedOption(ScrollbarStyleOptions(), editorSettings.scrollbarStyle));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::CaretMotion),
+                       "caret feel", LabelForNamedOption(CaretMotionOptions(), editorSettings.caretMotion));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::LinkUnderline),
+                       "link underline", OnOffLabel(editorSettings.linkUnderline));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::IndentMode),
                        "indentation", editorSettings.indentWithTabs ? "tabs" : "spaces");
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::AutoListContinuation),
@@ -323,17 +455,29 @@ namespace Software::Modes::Slate
         ImGui::Dummy(ImVec2(1.0f, 6.0f));
 
         bool previewInCodeFence = false;
-        DrawMarkdownLine("# Encounter Notes", previewInCodeFence);
-        DrawMarkdownLine("## Combat Loop", previewInCodeFence);
-        DrawMarkdownLine("- [ ] tune parry window", previewInCodeFence);
-        DrawMarkdownLine("- [x] player dodge feels right", previewInCodeFence);
-        DrawMarkdownLine("> pace matters more than particles", previewInCodeFence);
-        DrawMarkdownLine("A [link](Docs/Combat.md), **bold**, *italic*, and `code`.", previewInCodeFence);
-        DrawMarkdownLine("| stat | value |", previewInCodeFence);
-        DrawMarkdownLine("![](assets/encounter/board.png)", previewInCodeFence);
+        const float baseFontSize = ImGui::GetFontSize() > 1.0f ? ImGui::GetFontSize() : 18.0f;
+        const float previewFontScale =
+            std::clamp(static_cast<float>(editorSettings.fontSize) / std::max(1.0f, baseFontSize), 0.65f, 1.50f);
+        const ImGuiStyle& style = ImGui::GetStyle();
+        ImGui::SetWindowFontScale(previewFontScale);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(style.ItemSpacing.x, static_cast<float>(std::max(0, editorSettings.lineSpacing))));
+        DrawMarkdownLine("# Encounter Notes", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("## Combat Loop", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("- [ ] tune parry window", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("- [x] player dodge feels right", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("> pace matters more than particles", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("A [link](Docs/Combat.md), **bold**, *italic*, and `code`.", previewInCodeFence, false, false,
+                         previewFontScale);
+        DrawMarkdownLine("| stat | value |", previewInCodeFence, false, false, previewFontScale);
+        DrawMarkdownLine("![](assets/encounter/board.png)", previewInCodeFence, false, false, previewFontScale);
+        ImGui::PopStyleVar();
+        ImGui::SetWindowFontScale(1.0f);
 
         ImGui::Dummy(ImVec2(1.0f, 10.0f));
         ImGui::TextColored(Muted, "Editor settings save to .slate/editor.tsv. Appearance choices save to .slate/theme.tsv.");
+
+        ImGui::EndChild();
     }
 
     std::string SlateSettingsMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const

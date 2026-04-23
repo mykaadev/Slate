@@ -59,6 +59,8 @@ namespace Software::Slate
                                 float screenY,
                                 float width,
                                 float height);
+        ScintillaEditorHost::ScrollState NativeEditorScrollState() const;
+        void SetNativeEditorFirstVisibleLine(int line);
         void NotifyDocumentSaved();
         bool ConsumeNativeCommand(NativeEditorCommand command);
         void ReleaseNativeEditorFocus();

@@ -7,6 +7,8 @@
 
 #include "imgui.h"
 
+#include <algorithm>
+
 namespace Software::Modes::Slate
 {
     using namespace Software::Slate::UI;
@@ -170,12 +172,19 @@ namespace Software::Modes::Slate
         const auto& vaults = workspace.WorkspaceRegistry().Vaults();
         ui.workspaceNavigation.SetCount(vaults.size());
 
+        const float width = CenteredColumnWidth(760.0f);
+        const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
+        SetCursorCenteredForWidth(width);
+        ImGui::BeginChild("WorkspaceSwitcherList", ImVec2(width, height), false,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
         ImGui::TextColored(Cyan, "workspaces");
         ImGui::Separator();
 
         if (vaults.empty())
         {
             ImGui::TextColored(Muted, "no workspaces registered");
+            ImGui::EndChild();
             return;
         }
 
@@ -188,5 +197,6 @@ namespace Software::Modes::Slate
             ImGui::SameLine();
             ImGui::TextColored(Muted, "%s", vault.path.string().c_str());
         }
+        ImGui::EndChild();
     }
 }

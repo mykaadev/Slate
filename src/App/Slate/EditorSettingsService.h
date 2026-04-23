@@ -12,8 +12,17 @@ namespace Software::Slate
         int lineSpacing = 3;
         int pageWidth = 980;
         bool wordWrap = true;
+        bool showWhitespace = false;
         bool highlightCurrentLine = true;
         int tabWidth = 4;
+        int panelLayout = 0;
+        int previewRenderMode = 0;
+        int previewFollowMode = 3;
+        int panelMotion = 2;
+        int scrollMotion = 1;
+        int scrollbarStyle = 1;
+        int caretMotion = 1;
+        bool linkUnderline = true;
         bool indentWithTabs = false;
         bool autoListContinuation = true;
         bool pasteClipboardImages = true;

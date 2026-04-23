@@ -44,6 +44,13 @@ namespace Software::Slate::UI
                                     int* cursorPos = nullptr, int requestedCursorPos = -1);
     TextInputResult InputTextMultilineString(const char* label, std::string& text, const ImVec2& size,
                                              ImGuiInputTextFlags flags, int* cursorPos = nullptr);
+    float CenteredColumnWidth(float maxWidth = 760.0f, float minMargin = 0.0f);
+    void SetCursorCenteredForWidth(float width);
+    void PushSlateScrollbarStyle(int style = 1);
+    void PopSlateScrollbarStyle();
+    bool DrawVerticalDocumentScrollbar(const char* id, const ImVec2& size, int firstVisibleLine,
+                                       int visibleLineCount, int totalLineCount, int* targetFirstVisibleLine,
+                                       int style = 1);
     void TextCentered(const char* text, const ImVec4& color = Primary);
     void TextLine(const char* key, const char* label);
     float ShortcutTextWidth(std::string_view text);
@@ -53,6 +60,10 @@ namespace Software::Slate::UI
     bool ContainsFilter(const std::string& value, const char* filter);
     bool IsShiftQuestion();
     std::string DisplayNameForTreeRow(const TreeViewRow& row);
-    void DrawInlineSpans(const std::vector<MarkdownInlineSpan>& spans, const ImVec4& baseColor = Primary);
-    void DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter = false);
+    void DrawInlineSpans(const std::vector<MarkdownInlineSpan>& spans, const ImVec4& baseColor = Primary,
+                         bool showWhitespace = false);
+    void DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter = false,
+                          bool showWhitespace = false, float fontScale = 1.0f);
+    void DrawMarkdownImage(const fs::path& absolutePath, std::string_view alt, std::string_view target,
+                           float maxWidth);
 }

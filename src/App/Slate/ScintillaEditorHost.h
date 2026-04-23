@@ -14,11 +14,23 @@ namespace Software::Slate
         Find = 1u << 1,
         Escape = 1u << 2,
         PasteClipboardImage = 1u << 3,
+        Outline = 1u << 4,
+        Preview = 1u << 5,
+        NavigateBack = 1u << 6,
+        NavigateForward = 1u << 7,
     };
 
     class ScintillaEditorHost
     {
     public:
+        struct ScrollState
+        {
+            int firstVisibleLine = 0;
+            int visibleLineCount = 0;
+            int totalLineCount = 0;
+            int caretLine = 0;
+        };
+
         ScintillaEditorHost();
         ~ScintillaEditorHost();
 
@@ -42,6 +54,8 @@ namespace Software::Slate
 
         void JumpToLine(std::size_t line);
         bool InsertTextAtCursor(const std::string& text);
+        ScrollState GetScrollState() const;
+        void SetFirstVisibleLine(int line);
 
         bool ConsumeCommand(NativeEditorCommand command);
 

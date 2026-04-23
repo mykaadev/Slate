@@ -124,9 +124,33 @@ if(WIN32)
     file(GLOB LEXILLA_SUPPORT_SOURCES CONFIGURE_DEPENDS
         "${LEXILLA_ROOT}/lexlib/*.cxx"
     )
+    file(READ "${LEXILLA_ROOT}/lexers/LexMarkdown.cxx" SLATE_LEX_MARKDOWN_SOURCE)
+    set(SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD [=[            if (sc.Match("](") && sc.GetRelative(-1) != '\\') {
+                sc.Forward(2);
+                isLinkNameDetecting = true;
+            }]=])
+    set(SLATE_LEX_MARKDOWN_EMPTY_LINK_NEW [=[            if (sc.Match("](") && sc.GetRelative(-1) != '\\') {
+                sc.Forward(2);
+                isLinkNameDetecting = true;
+                if (sc.ch == ')' && sc.GetRelative(-1) != '\\') {
+                    isLinkNameDetecting = false;
+                    sc.SetState(SCE_MARKDOWN_DEFAULT);
+                }
+            }]=])
+    string(FIND "${SLATE_LEX_MARKDOWN_SOURCE}" "${SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD}" SLATE_LEX_MARKDOWN_PATCH_AT)
+    if(SLATE_LEX_MARKDOWN_PATCH_AT EQUAL -1)
+        message(FATAL_ERROR "Could not patch LexMarkdown empty link handling.")
+    endif()
+    string(REPLACE "${SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD}"
+                   "${SLATE_LEX_MARKDOWN_EMPTY_LINK_NEW}"
+                   SLATE_LEX_MARKDOWN_SOURCE
+                   "${SLATE_LEX_MARKDOWN_SOURCE}")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/Lexilla")
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/Lexilla/LexMarkdownPatched.cxx" "${SLATE_LEX_MARKDOWN_SOURCE}")
+
     add_library(SlateMarkdownLexer STATIC
         ${LEXILLA_SUPPORT_SOURCES}
-        "${LEXILLA_ROOT}/lexers/LexMarkdown.cxx"
+        "${CMAKE_BINARY_DIR}/generated/Lexilla/LexMarkdownPatched.cxx"
     )
     target_include_directories(SlateMarkdownLexer PUBLIC
         "${LEXILLA_ROOT}/include"
@@ -233,6 +257,7 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         ScintillaCore
         SlateMarkdownLexer
+        gdiplus
     )
 endif()
 

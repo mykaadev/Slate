@@ -312,6 +312,19 @@ namespace Software::Slate
         }
     }
 
+    ScintillaEditorHost::ScrollState SlateEditorContext::NativeEditorScrollState() const
+    {
+        return m_nativeEditor ? m_nativeEditor->GetScrollState() : ScintillaEditorHost::ScrollState{};
+    }
+
+    void SlateEditorContext::SetNativeEditorFirstVisibleLine(int line)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->SetFirstVisibleLine(line);
+        }
+    }
+
     void SlateEditorContext::NotifyDocumentSaved()
     {
         if (m_nativeEditor)

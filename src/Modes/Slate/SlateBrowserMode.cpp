@@ -135,17 +135,21 @@ namespace Software::Modes::Slate
             !SearchOpen() && !PromptOpen() && !ConfirmOpen())
         {
             ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 82.0f);
+            const float rowWidth = std::min(620.0f, ImGui::GetContentRegionAvail().x);
+            SetCursorCenteredForWidth(rowWidth);
+            ImGui::BeginGroup();
             ImGui::TextColored(Amber, "(/)");
             ImGui::SameLine();
             ImGui::TextColored(Primary, "filter");
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.42f);
+            ImGui::SetNextItemWidth(std::max(220.0f, rowWidth - 92.0f));
             if (ui.focusFilter)
             {
                 ImGui::SetKeyboardFocusHere();
                 ui.focusFilter = false;
             }
             InputTextString("##TreeFilter", ui.filterText, 0);
+            ImGui::EndGroup();
         }
     }
 
@@ -641,12 +645,19 @@ namespace Software::Modes::Slate
     void SlateBrowserMode::DrawPathList(Software::Core::Runtime::AppContext& context, const char* title, const char* emptyText)
     {
         auto& ui = UiState(context);
+        const float width = CenteredColumnWidth(760.0f);
+        const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
+        SetCursorCenteredForWidth(width);
+        ImGui::BeginChild("BrowserPathList", ImVec2(width, height), false,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
         ImGui::TextColored(Cyan, "%s", title);
         ImGui::Separator();
 
         if (ui.visiblePaths.empty())
         {
             ImGui::TextColored(Muted, "%s", emptyText);
+            ImGui::EndChild();
             return;
         }
 
@@ -656,11 +667,18 @@ namespace Software::Modes::Slate
             ImGui::TextColored(selected ? Green : Primary, "%s %s", selected ? ">" : " ",
                                ui.visiblePaths[i].generic_string().c_str());
         }
+        ImGui::EndChild();
     }
 
     void SlateBrowserMode::DrawFileTree(Software::Core::Runtime::AppContext& context, bool folderPicker)
     {
         auto& ui = UiState(context);
+        const float width = CenteredColumnWidth(820.0f);
+        const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
+        SetCursorCenteredForWidth(width);
+        ImGui::BeginChild("BrowserFileTree", ImVec2(width, height), false,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
         const bool movePicker = folderPicker && ui.folderPickerAction == Software::Slate::FolderPickerAction::MoveDestination;
         const char* title = ui.browserView == Software::Slate::SlateBrowserView::Library
                                 ? "library"
@@ -680,6 +698,7 @@ namespace Software::Modes::Slate
         if (ui.treeRows.empty())
         {
             ImGui::TextColored(Muted, "no matching entries");
+            ImGui::EndChild();
             return;
         }
 
@@ -696,5 +715,6 @@ namespace Software::Modes::Slate
             const ImVec4 color = selected ? Green : (row.matchedFilter ? Amber : Primary);
             ImGui::TextColored(color, "%s %s%s %s", marker, indent.c_str(), type, DisplayNameForTreeRow(row).c_str());
         }
+        ImGui::EndChild();
     }
 }

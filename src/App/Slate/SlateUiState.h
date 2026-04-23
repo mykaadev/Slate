@@ -27,6 +27,7 @@ namespace Software::Slate
     enum class SlateEditorView
     {
         Document,
+        Preview,
         Outline
     };
 
@@ -45,9 +46,22 @@ namespace Software::Slate
         SlateWorkspaceView workspaceView = SlateWorkspaceView::Setup;
         SlateBrowserView browserView = SlateBrowserView::FileTree;
         SlateEditorView editorView = SlateEditorView::Document;
+        bool outlinePanelOpen = false;
+        bool previewPanelOpen = false;
+        float outlinePanelProgress = 0.0f;
+        float previewPanelProgress = 0.0f;
+        float previewScrollY = 0.0f;
+        float previewScrollTargetY = 0.0f;
+        double previewManualScrollUntil = 0.0;
+        int previewLastFollowLine = -1;
+        float nativeEditorScrollLine = 0.0f;
+        float nativeEditorScrollTargetLine = 0.0f;
+        bool nativeEditorScrollTargetActive = false;
 
         NavigationController navigation;
         NavigationController workspaceNavigation;
+        std::vector<fs::path> documentHistory;
+        int documentHistoryIndex = -1;
 
         fs::path pendingPath;
         fs::path pendingTargetPath;

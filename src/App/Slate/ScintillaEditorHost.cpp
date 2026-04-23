@@ -236,6 +236,11 @@ namespace Software::Slate
             return SC_EOL_LF;
         }
 
+        int PixelFontSizeToScintillaPoints(float pixelSize)
+        {
+            return static_cast<int>(std::clamp(std::lround(pixelSize * 72.0f / 96.0f), 7l, 32l));
+        }
+
         constexpr wchar_t HostPropertyName[] = L"SlateScintillaHost";
 #endif
     }
@@ -486,6 +491,45 @@ namespace Software::Slate
 #endif
     }
 
+    ScintillaEditorHost::ScrollState ScintillaEditorHost::GetScrollState() const
+    {
+        ScrollState state;
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return state;
+        }
+
+        state.firstVisibleLine =
+            static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETFIRSTVISIBLELINE, 0, 0));
+        state.visibleLineCount =
+            static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_LINESONSCREEN, 0, 0));
+        state.totalLineCount =
+            static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETLINECOUNT, 0, 0));
+        const auto caretPosition =
+            static_cast<sptr_t>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETCURRENTPOS, 0, 0));
+        state.caretLine =
+            static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_LINEFROMPOSITION,
+                                            static_cast<WPARAM>(caretPosition), 0));
+#endif
+        return state;
+    }
+
+    void ScintillaEditorHost::SetFirstVisibleLine(int line)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return;
+        }
+
+        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_SETFIRSTVISIBLELINE,
+                       static_cast<WPARAM>(std::max(0, line)), 0);
+#else
+        (void)line;
+#endif
+    }
+
     bool ScintillaEditorHost::HandleSmartEnter()
     {
 #if defined(_WIN32)
@@ -645,7 +689,7 @@ namespace Software::Slate
         call(SCI_SETMULTIPLESELECTION, 1, 0);
         call(SCI_SETADDITIONALSELECTIONTYPING, 1, 0);
         call(SCI_SETMULTIPASTE, SC_MULTIPASTE_EACH, 0);
-        call(SCI_SETCARETWIDTH, 2, 0);
+        call(SCI_SETCARETWIDTH, 1, 0);
         call(SCI_SETMARGINWIDTHN, 0, 0);
         call(SCI_SETMARGINWIDTHN, 1, 0);
         call(SCI_SETMARGINWIDTHN, 2, 0);
@@ -653,8 +697,12 @@ namespace Software::Slate
         call(SCI_SETMARGINLEFT, 0, 16);
         call(SCI_SETMARGINRIGHT, 0, 16);
         call(SCI_SETLAYOUTCACHE, SC_CACHE_PAGE, 0);
-        call(SCI_SETEXTRAASCENT, 3, 0);
-        call(SCI_SETEXTRADESCENT, 3, 0);
+        call(SCI_SETEXTRAASCENT, 2, 0);
+        call(SCI_SETEXTRADESCENT, 1, 0);
+        call(SCI_SETVSCROLLBAR, 0, 0);
+        call(SCI_SETVIEWWS, SCWS_INVISIBLE, 0);
+        call(SCI_SETWHITESPACESIZE, 2, 0);
+        call(SCI_SETTABDRAWMODE, SCTD_LONGARROW, 0);
         call(SCI_SETUSETABS, 0, 0);
         call(SCI_SETTABWIDTH, 4, 0);
         call(SCI_SETINDENT, 4, 0);
@@ -679,7 +727,6 @@ namespace Software::Slate
         const COLORREF background = ToColorRef(UI::Background);
         const COLORREF primary = ToColorRef(UI::Primary);
         const COLORREF muted = ToColorRef(UI::Muted);
-        const COLORREF cyan = ToColorRef(UI::Cyan);
         const COLORREF panel = ToColorRef(UI::Panel);
         const COLORREF selection = ToColorRef(MixColor(UI::Background, UI::Cyan, 0.20f));
         const COLORREF caretLine = ToColorRef(MixColor(UI::Background, UI::Panel, 0.72f));
@@ -690,26 +737,43 @@ namespace Software::Slate
         };
 
         const int fontSize = m_editorSettings.fontSize;
+        const int editorPointSize = PixelFontSizeToScintillaPoints(static_cast<float>(fontSize));
         const int lineSpacing = m_editorSettings.lineSpacing;
+        const int extraAscent = (lineSpacing + 1) / 2;
+        const int extraDescent = lineSpacing / 2;
         const int tabWidth = m_editorSettings.tabWidth;
+        const int caretMotion = m_editorSettings.caretMotion;
 
         call(SCI_STYLESETFONT, STYLE_DEFAULT, reinterpret_cast<LPARAM>("Cascadia Mono"));
-        call(SCI_STYLESETSIZE, STYLE_DEFAULT, fontSize);
+        call(SCI_STYLESETSIZE, STYLE_DEFAULT, editorPointSize);
         call(SCI_STYLESETFORE, STYLE_DEFAULT, primary);
         call(SCI_STYLESETBACK, STYLE_DEFAULT, background);
         call(SCI_STYLECLEARALL, 0, 0);
 
         call(SCI_SETCARETFORE, primary, 0);
+        call(SCI_SETCARETWIDTH, 1, 0);
+        call(SCI_SETCARETPERIOD, caretMotion == 0 ? 500 : (caretMotion == 1 ? 700 : 0), 0);
+        call(SCI_SETCARETSTYLE, CARETSTYLE_LINE, 0);
+        call(SCI_SETXCARETPOLICY, CARET_SLOP | (caretMotion == 2 ? CARET_EVEN : 0),
+             caretMotion == 0 ? 16 : (caretMotion == 1 ? 32 : 48));
+        call(SCI_SETYCARETPOLICY, CARET_SLOP | CARET_EVEN | (caretMotion == 2 ? CARET_STRICT : 0),
+             caretMotion == 0 ? 2 : (caretMotion == 1 ? 5 : 8));
+        call(SCI_SETVISIBLEPOLICY, VISIBLE_SLOP, caretMotion == 0 ? 2 : 4);
+        call(SCI_SETPHASESDRAW, SC_PHASES_MULTIPLE, 0);
         call(SCI_SETCARETLINEBACK, caretLine, 0);
         call(SCI_SETCARETLINEVISIBLE, m_editorSettings.highlightCurrentLine ? 1 : 0, 0);
         call(SCI_SETSELBACK, 1, selection);
         call(SCI_SETSELFORE, 0, 0);
         call(SCI_SETWHITESPACEFORE, 1, muted);
         call(SCI_SETWHITESPACEBACK, 1, background);
+        call(SCI_SETVIEWWS, m_editorSettings.showWhitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE, 0);
+        call(SCI_SETWHITESPACESIZE, 2, 0);
+        call(SCI_SETTABDRAWMODE, SCTD_LONGARROW, 0);
         call(SCI_SETWRAPMODE, m_editorSettings.wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE, 0);
         call(SCI_SETHSCROLLBAR, m_editorSettings.wordWrap ? 0 : 1, 0);
-        call(SCI_SETEXTRAASCENT, lineSpacing, 0);
-        call(SCI_SETEXTRADESCENT, lineSpacing, 0);
+        call(SCI_SETVSCROLLBAR, 0, 0);
+        call(SCI_SETEXTRAASCENT, extraAscent, 0);
+        call(SCI_SETEXTRADESCENT, extraDescent, 0);
         call(SCI_SETUSETABS, m_editorSettings.indentWithTabs ? 1 : 0, 0);
         call(SCI_SETTABWIDTH, tabWidth, 0);
         call(SCI_SETINDENT, tabWidth, 0);
@@ -717,9 +781,9 @@ namespace Software::Slate
         call(SCI_STYLESETFORE, SCE_MARKDOWN_DEFAULT, primary);
         call(SCI_STYLESETBACK, SCE_MARKDOWN_DEFAULT, background);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_LINE_BEGIN, muted);
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_PRECHAR, muted);
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, muted);
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_LINE_BEGIN, ToColorRef(UI::MarkdownHeading1));
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_PRECHAR, ToColorRef(UI::MarkdownBullet));
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, ToColorRef(UI::MarkdownTable));
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_STRONG1, ToColorRef(UI::MarkdownBold));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_STRONG2, ToColorRef(UI::MarkdownBold));
@@ -734,27 +798,27 @@ namespace Software::Slate
         call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER1, ToColorRef(UI::MarkdownHeading1));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER2, ToColorRef(UI::MarkdownHeading2));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER3, ToColorRef(UI::MarkdownHeading3));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER4, cyan);
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER5, ToColorRef(UI::MarkdownTable));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER6, muted);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER1, 1);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER2, 1);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER3, 1);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER1, fontSize + 6);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER2, fontSize + 3);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER3, fontSize + 1);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER4, fontSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER5, fontSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER6, fontSize);
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER4, ToColorRef(UI::MarkdownHeading3));
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER5, ToColorRef(UI::MarkdownHeading3));
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER6, ToColorRef(UI::MarkdownHeading3));
+        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER1, 0);
+        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER2, 0);
+        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER3, 0);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER1, editorPointSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER2, editorPointSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER3, editorPointSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER4, editorPointSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER5, editorPointSize);
+        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER6, editorPointSize);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_ULIST_ITEM, ToColorRef(UI::MarkdownBullet));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_OLIST_ITEM, ToColorRef(UI::MarkdownBullet));
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_ULIST_ITEM, 1);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_OLIST_ITEM, 1);
+        call(SCI_STYLESETBOLD, SCE_MARKDOWN_ULIST_ITEM, 0);
+        call(SCI_STYLESETBOLD, SCE_MARKDOWN_OLIST_ITEM, 0);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_BLOCKQUOTE, ToColorRef(UI::MarkdownQuote));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_LINK, ToColorRef(UI::MarkdownLink));
-        call(SCI_STYLESETUNDERLINE, SCE_MARKDOWN_LINK, 1);
+        call(SCI_STYLESETUNDERLINE, SCE_MARKDOWN_LINK, m_editorSettings.linkUnderline ? 1 : 0);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_CODE, ToColorRef(UI::MarkdownCode));
         call(SCI_STYLESETFORE, SCE_MARKDOWN_CODE2, ToColorRef(UI::MarkdownCode));
@@ -765,7 +829,7 @@ namespace Software::Slate
         call(SCI_STYLESETEOLFILLED, SCE_MARKDOWN_CODEBK, 1);
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_STRIKEOUT, muted);
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, muted);
+        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, ToColorRef(UI::MarkdownTable));
 
         call(SCI_COLOURISE, 0, -1);
 #endif
@@ -872,8 +936,18 @@ namespace Software::Slate
     {
         const bool ctrlPressed = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool altPressed = (::GetKeyState(VK_MENU) & 0x8000) != 0;
-        if (message == WM_KEYDOWN)
+        if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
         {
+            if (altPressed && !ctrlPressed && wParam == VK_LEFT)
+            {
+                m_pendingCommands |= CommandMask(NativeEditorCommand::NavigateBack);
+                return 0;
+            }
+            if (altPressed && !ctrlPressed && wParam == VK_RIGHT)
+            {
+                m_pendingCommands |= CommandMask(NativeEditorCommand::NavigateForward);
+                return 0;
+            }
             if (ctrlPressed && (wParam == 'S' || wParam == 's'))
             {
                 m_pendingCommands |= CommandMask(NativeEditorCommand::Save);
@@ -882,6 +956,16 @@ namespace Software::Slate
             if (ctrlPressed && (wParam == 'F' || wParam == 'f'))
             {
                 m_pendingCommands |= CommandMask(NativeEditorCommand::Find);
+                return 0;
+            }
+            if (ctrlPressed && (wParam == 'O' || wParam == 'o'))
+            {
+                m_pendingCommands |= CommandMask(NativeEditorCommand::Outline);
+                return 0;
+            }
+            if (ctrlPressed && (wParam == 'P' || wParam == 'p'))
+            {
+                m_pendingCommands |= CommandMask(NativeEditorCommand::Preview);
                 return 0;
             }
             if (m_editorSettings.pasteClipboardImages &&
