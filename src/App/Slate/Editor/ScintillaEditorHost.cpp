@@ -48,6 +48,19 @@ namespace Software::Slate
             return text.substr(start, end - start);
         }
 
+        bool IsTodoSlashCommand(std::string_view text)
+        {
+            text = TrimWhitespace(text);
+            if (text.size() != 5 || text[0] != '/')
+            {
+                return false;
+            }
+            return static_cast<char>(std::tolower(static_cast<unsigned char>(text[1]))) == 't' &&
+                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[2]))) == 'o' &&
+                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[3]))) == 'd' &&
+                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[4]))) == 'o';
+        }
+
         std::string StripLineEnding(std::string text)
         {
             while (!text.empty() && (text.back() == '\0' || text.back() == '\n' || text.back() == '\r'))
@@ -291,6 +304,10 @@ namespace Software::Slate
             return;
         }
 
+        if (!visible && ::GetFocus() == static_cast<HWND>(m_editorWindow) && m_parentWindow)
+        {
+            ::SetFocus(static_cast<HWND>(m_parentWindow));
+        }
         ::ShowWindow(static_cast<HWND>(m_editorWindow), visible ? SW_SHOW : SW_HIDE);
 #endif
     }
@@ -561,6 +578,24 @@ namespace Software::Slate
         return true;
 #else
         (void)text;
+        return false;
+#endif
+    }
+
+    bool ScintillaEditorHost::DeleteCurrentLine()
+    {
+#if defined(_WIN32)
+        if (!EnsureWindow())
+        {
+            return false;
+        }
+
+        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_BEGINUNDOACTION, 0, 0);
+        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_LINEDELETE, 0, 0);
+        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_COLOURISE, 0, -1);
+        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_ENDUNDOACTION, 0, 0);
+        return true;
+#else
         return false;
 #endif
     }
@@ -1072,8 +1107,9 @@ namespace Software::Slate
             if (!ctrlPressed && !altPressed && wParam == VK_RETURN)
             {
                 std::string lineText;
-                if (CurrentLineText(&lineText) && TrimWhitespace(lineText) == "/todo")
+                if (CurrentLineText(&lineText) && IsTodoSlashCommand(lineText))
                 {
+                    DeleteCurrentLine();
                     m_pendingCommands |= CommandMask(NativeEditorCommand::Todo);
                     return 0;
                 }

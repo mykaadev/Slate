@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Software::Slate
@@ -114,7 +115,7 @@ namespace Software::Modes::Slate
         // Opens the todo overlay
         void ShowTodos(Software::Core::Runtime::AppContext& context);
         // Starts todo creation from the editor
-        void BeginTodoCreate(Software::Core::Runtime::AppContext& context);
+        void BeginTodoCreate(Software::Core::Runtime::AppContext& context, bool fromSlashCommand = false);
         // Returns to the home mode
         void ShowHome(Software::Core::Runtime::AppContext& context);
         // Handles command prompt input
@@ -183,13 +184,22 @@ namespace Software::Modes::Slate
             Edit
         };
 
+        // Tracks which todo form text field should regain keyboard focus
+        enum class TodoFormFocusField
+        {
+            Title,
+            Description
+        };
+
         // Stores the todo form state
         struct TodoFormState
         {
             // Marks whether the form is open
             bool open = false;
-            // Requests focus for the title input
-            bool focusTitle = false;
+            // Requests focus for the last active text input
+            bool requestTextFocus = false;
+            // Stores the text field that should regain keyboard focus
+            TodoFormFocusField focusField = TodoFormFocusField::Title;
             // Marks whether the current editor line should be replaced
             bool replaceActiveLine = false;
             // Stores the source document for a pending slash command
@@ -236,6 +246,11 @@ namespace Software::Modes::Slate
         void CancelTodoForm(Software::Core::Runtime::AppContext& context);
         // Removes a pending slash todo command line
         bool RemovePendingTodoCommand(Software::Core::Runtime::AppContext& context);
+
+        public:
+
+        // Tests whether text is exactly the slash command that creates a todo
+        static bool IsTodoSlashCommand(std::string_view text);
         // Replaces a pending slash todo command line with a todo block
         bool ReplacePendingTodoCommand(Software::Core::Runtime::AppContext& context, const std::string& block);
         // Saves the current todo form

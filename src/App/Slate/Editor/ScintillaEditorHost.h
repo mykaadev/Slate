@@ -84,6 +84,8 @@ namespace Software::Slate
         bool CurrentLineText(std::string* text) const;
         // Replaces the current line text
         bool ReplaceCurrentLine(const std::string& text);
+        // Deletes the current physical line
+        bool DeleteCurrentLine();
         // Returns current scroll state
         ScrollState GetScrollState() const;
         // Sets the first visible line

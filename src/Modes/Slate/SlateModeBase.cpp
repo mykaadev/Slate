@@ -272,6 +272,15 @@ namespace Software::Modes::Slate
         const bool overlayOpen =
             m_helpOpen || m_prompt.open || m_confirm.open || m_searchOverlayOpen || m_workspaceOverlayOpen ||
             m_todoOverlayOpen || m_todoForm.open;
+        if (m_todoForm.open)
+        {
+            // The todo form is rendered by ImGui, while the main editor may be a
+            // native Scintilla child window. If Windows restores focus to that
+            // hidden child after an alt-tab / focus loss, ImGui text fields stop
+            // receiving keyboard input. Keep OS focus on the parent while the form
+            // is open so the active title/description field can receive typing.
+            EditorContext(context).ReleaseNativeEditorFocus();
+        }
         EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context) && !overlayOpen);
 
         DrawRootBegin(context);
@@ -383,6 +392,11 @@ namespace Software::Modes::Slate
         m_status = std::move(message);
         m_statusSeconds = m_nowSeconds;
         m_statusIsError = true;
+    }
+
+    bool SlateModeBase::IsTodoSlashCommand(std::string_view text)
+    {
+        return Software::Slate::PathUtils::ToLower(Software::Slate::PathUtils::Trim(text)) == "/todo";
     }
 
     void SlateModeBase::BeginCommandPrompt()
@@ -789,7 +803,7 @@ namespace Software::Modes::Slate
         m_todoNavigation.Reset();
     }
 
-    void SlateModeBase::BeginTodoCreate(Software::Core::Runtime::AppContext& context)
+    void SlateModeBase::BeginTodoCreate(Software::Core::Runtime::AppContext& context, bool fromSlashCommand)
     {
         if (!WorkspaceContext(context).HasWorkspaceLoaded())
         {
@@ -800,6 +814,11 @@ namespace Software::Modes::Slate
         auto& editor = EditorContext(context);
         auto& documents = workspace.Documents();
 
+        // Pull the latest text first. The native Scintilla path may already have
+        // deleted the slash-command line before queuing Todo, so command detection
+        // must not rely only on the still-visible active-line text.
+        editor.CommitToActiveDocument(documents, m_nowSeconds);
+
         std::string activeLine;
         const bool hasActiveLine = editor.ActiveLineText(&activeLine);
         const auto* active = documents.Active();
@@ -807,21 +826,28 @@ namespace Software::Modes::Slate
             editor.NativeEditorAvailable()
                 ? static_cast<std::size_t>(std::max(1, editor.NativeEditorScrollState().caretLine + 1))
                 : (editor.Editor().ActiveLine() + 1);
-
-        editor.CommitToActiveDocument(documents, m_nowSeconds);
-        editor.ReleaseNativeEditorFocus();
+        const bool launchedFromTodoCommand = fromSlashCommand ||
+                                             (hasActiveLine && IsTodoSlashCommand(activeLine));
         m_todoForm = {};
-        m_todoForm.open = true;
-        m_todoForm.focusTitle = true;
         m_todoForm.mode = TodoFormMode::Create;
+        m_todoForm.requestTextFocus = true;
+        m_todoForm.focusField = TodoFormFocusField::Title;
         m_todoForm.state = Software::Slate::TodoState::Open;
-        m_todoForm.replaceActiveLine = hasActiveLine && Software::Slate::PathUtils::Trim(activeLine) == "/todo";
+        m_todoForm.replaceActiveLine = launchedFromTodoCommand;
         if (m_todoForm.replaceActiveLine && active)
         {
             m_todoForm.pendingCommandPath = Software::Slate::PathUtils::NormalizeRelative(active->relativePath);
             m_todoForm.pendingCommandLine = activeLineNumber;
+
+            // Slash commands are transient UI input, not document content. Remove /todo
+            // immediately after syncing the native/fallback editor and before the popup
+            // is opened, so cancel/create never leaves the command in the note.
+            RemovePendingTodoCommand(context);
         }
+        editor.ReleaseNativeEditorFocus();
+        editor.SetNativeEditorVisible(false);
         m_todoForm.title = "Untitled todo";
+        m_todoForm.open = true;
     }
 
     void SlateModeBase::ShowHome(Software::Core::Runtime::AppContext& context)
@@ -1344,6 +1370,10 @@ namespace Software::Modes::Slate
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
         ImGui::BeginChild("TodoFormOverlay", size, true);
+        if (m_todoForm.requestTextFocus)
+        {
+            ImGui::SetWindowFocus();
+        }
         const bool formHovered =
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         ImGui::TextColored(Amber, "%s", m_todoForm.mode == TodoFormMode::Create ? "new todo" : "edit todo");
@@ -1351,24 +1381,62 @@ namespace Software::Modes::Slate
         ImGui::TextColored(TodoStateColor(m_todoForm.state),
                            "[%s]",
                            Software::Slate::MarkdownService::TodoStateLabel(m_todoForm.state));
-        if (m_todoForm.focusTitle)
+        ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
+
+        ImGui::SetNextItemWidth(-1.0f);
+        if (m_todoForm.requestTextFocus && m_todoForm.focusField == TodoFormFocusField::Title)
         {
             ImGui::SetKeyboardFocusHere();
-            m_todoForm.focusTitle = false;
         }
-        ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
-        ImGui::SetNextItemWidth(-1.0f);
         const auto titleResult =
             InputTextString("##TodoTitle", m_todoForm.title, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool titleActive = ImGui::IsItemActive();
+        const bool titleFocused = ImGui::IsItemFocused();
+        if (titleActive || titleFocused || ImGui::IsItemClicked())
+        {
+            m_todoForm.focusField = TodoFormFocusField::Title;
+        }
+        if (m_todoForm.requestTextFocus && m_todoForm.focusField == TodoFormFocusField::Title &&
+            (titleActive || titleFocused))
+        {
+            m_todoForm.requestTextFocus = false;
+        }
+
         ImGui::SetNextItemWidth(-1.0f);
+        if (m_todoForm.requestTextFocus && m_todoForm.focusField == TodoFormFocusField::Description)
+        {
+            ImGui::SetKeyboardFocusHere();
+        }
         const auto descriptionResult =
             InputTextString("##TodoDescription", m_todoForm.description, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool descriptionActive = ImGui::IsItemActive();
+        const bool descriptionFocused = ImGui::IsItemFocused();
+        if (descriptionActive || descriptionFocused || ImGui::IsItemClicked())
+        {
+            m_todoForm.focusField = TodoFormFocusField::Description;
+        }
+        if (m_todoForm.requestTextFocus && m_todoForm.focusField == TodoFormFocusField::Description &&
+            (descriptionActive || descriptionFocused))
+        {
+            m_todoForm.requestTextFocus = false;
+        }
+
+        const bool textInputActive = titleActive || descriptionActive || titleFocused || descriptionFocused;
         ImGui::PopItemFlag();
         ImGui::Separator();
         DrawShortcutText("(tab) state   (enter) save   (esc) cancel", Amber, Primary);
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
+
+        // If the app/window lost focus while the form was open, ImGui can drop the
+        // active text item. Keep retrying focus until the intended field is actually
+        // active/focused; otherwise the request can be consumed while the app is not
+        // focused and the description input gets stuck ignoring keyboard input.
+        if (!textInputActive && !ImGui::IsAnyItemActive())
+        {
+            m_todoForm.requestTextFocus = true;
+        }
 
         if (IsKeyPressed(ImGuiKey_Tab))
         {
@@ -1646,7 +1714,8 @@ namespace Software::Modes::Slate
     {
         m_todoForm = {};
         m_todoForm.open = true;
-        m_todoForm.focusTitle = true;
+        m_todoForm.requestTextFocus = true;
+        m_todoForm.focusField = TodoFormFocusField::Title;
         m_todoForm.mode = TodoFormMode::Edit;
         m_todoForm.ticket = ticket;
         m_todoForm.state = ticket.state;
@@ -1695,7 +1764,7 @@ namespace Software::Modes::Slate
             return false;
         }
         const std::size_t removeIndex = std::min(m_todoForm.pendingCommandLine - 1, lines.size() - 1);
-        if (Software::Slate::PathUtils::Trim(lines[removeIndex]) != "/todo")
+        if (!IsTodoSlashCommand(lines[removeIndex]))
         {
             return false;
         }
@@ -1722,6 +1791,8 @@ namespace Software::Modes::Slate
         active->text = std::move(updatedText);
         documents.MarkEdited(m_nowSeconds);
         editor.LoadFromActiveDocument(documents);
+        editor.ReleaseNativeEditorFocus();
+        editor.SetNativeEditorVisible(false);
         editor.JumpToLine(std::min(removeIndex + 1, lines.size()));
         return true;
     }
@@ -1753,11 +1824,7 @@ namespace Software::Modes::Slate
             return false;
         }
 
-        const std::size_t replaceIndex = std::min(m_todoForm.pendingCommandLine - 1, lines.size() - 1);
-        if (Software::Slate::PathUtils::Trim(lines[replaceIndex]) != "/todo")
-        {
-            return false;
-        }
+        std::size_t replaceIndex = std::min(m_todoForm.pendingCommandLine - 1, lines.size());
 
         auto replacement = Software::Slate::MarkdownService::SplitLines(block);
         if (replacement.empty())
@@ -1765,7 +1832,17 @@ namespace Software::Modes::Slate
             replacement.emplace_back();
         }
 
-        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex));
+        // Normal path: /todo was already removed when the popup opened, so insert
+        // the generated block back at that original line. Legacy path: if /todo is
+        // still present for any reason, replace it instead of inserting below it.
+        if (replaceIndex < lines.size())
+        {
+            const std::string trimmedLine = Software::Slate::PathUtils::Trim(lines[replaceIndex]);
+            if (IsTodoSlashCommand(trimmedLine) || (lines.size() == 1 && trimmedLine.empty()))
+            {
+                lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex));
+            }
+        }
         lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex), replacement.begin(), replacement.end());
 
         std::string updatedText;

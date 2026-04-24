@@ -601,7 +601,7 @@ namespace Software::Modes::Slate
                 }
                 if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Todo))
                 {
-                    BeginTodoCreate(context);
+                    BeginTodoCreate(context, true);
                 }
                 if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::NavigateBack))
                 {
@@ -1264,9 +1264,9 @@ namespace Software::Modes::Slate
 
                 if (result.submitted)
                 {
-                    if (Software::Slate::PathUtils::Trim(editor.ActiveLineText()) == "/todo")
+                    if (IsTodoSlashCommand(editor.ActiveLineText()))
                     {
-                        BeginTodoCreate(context);
+                        BeginTodoCreate(context, true);
                     }
                     else
                     {
