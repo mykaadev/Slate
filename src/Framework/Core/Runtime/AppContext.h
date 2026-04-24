@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "Core/Runtime/CommandRegistry.h"
 #include "Core/Runtime/EventBus.h"
 #include "Core/Runtime/ServiceLocator.h"
 
@@ -39,6 +40,9 @@ namespace Software::Core::Runtime
 
         /** Event bus used for decoupled messaging. */
         EventBus& events;
+
+        /** Registry of app commands and command aliases. */
+        CommandRegistry& commands;
 
         /** Timing data for the frame. */
         FrameInfo frame;

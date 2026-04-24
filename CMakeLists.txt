@@ -171,7 +171,6 @@ file(GLOB_RECURSE SLATE_APP_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/App/DefaultModules/*.cpp"
     "${CMAKE_SOURCE_DIR}/src/App/Runtime/*.cpp"
     "${CMAKE_SOURCE_DIR}/src/App/Slate/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/Features/Slate/*.cpp"
     "${CMAKE_SOURCE_DIR}/src/Modes/Slate/*.cpp"
 )
 
@@ -223,6 +222,9 @@ file(GLOB_RECURSE SLATE_CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/App/Slate/*.cpp"
 )
 list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/UI/.*")
+list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Overlays/.*")
+list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Modules/.*")
+list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Commands/.*")
 
 add_executable(SlateCoreTests
     tests/SlateCoreTests.cpp
@@ -231,7 +233,13 @@ add_executable(SlateCoreTests
 
 target_include_directories(SlateCoreTests PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
+    "${CMAKE_SOURCE_DIR}/src/Framework"
+    "${CMAKE_BINARY_DIR}/generated"
     ${imgui_SOURCE_DIR}
+)
+
+target_link_libraries(SlateCoreTests PRIVATE
+    SoftwareFramework
 )
 
 add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)

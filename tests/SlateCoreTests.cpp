@@ -7,6 +7,7 @@
 #include "App/Slate/Markdown/MarkdownService.h"
 #include "App/Slate/Core/NavigationController.h"
 #include "App/Slate/Workspace/SearchService.h"
+#include "App/Slate/Todos/TodoService.h"
 #include "App/Slate/Workspace/ThemeService.h"
 #include "App/Slate/UI/SlateUi.h"
 #include "App/Slate/Workspace/WorkspaceService.h"
@@ -585,6 +586,23 @@ namespace
         fs::remove_all(root);
     }
 
+    void TestTodoServiceMatching()
+    {
+        Software::Slate::TodoTicket todo;
+        todo.title = "Refactor command routing";
+        todo.description = "Move command handling out of the base mode";
+        todo.relativePath = fs::path("Docs/Architecture.md");
+        todo.state = Software::Slate::TodoState::Doing;
+        todo.tags = {"architecture", "commands"};
+
+        CHECK(Software::Slate::TodoService::StateSortKey(Software::Slate::TodoState::Open) <
+              Software::Slate::TodoService::StateSortKey(Software::Slate::TodoState::Done));
+        CHECK(Software::Slate::TodoService::MatchesQuery(todo, "command"));
+        CHECK(Software::Slate::TodoService::MatchesQuery(todo, "#architecture"));
+        CHECK(Software::Slate::TodoService::MatchesQuery(todo, "doing"));
+        CHECK(!Software::Slate::TodoService::MatchesQuery(todo, "unrelated"));
+    }
+
     void TestEditorSettingsRoundTrip()
     {
         const fs::path root = MakeTempWorkspace();
@@ -659,6 +677,7 @@ int main()
     TestWorkspaceRegistry();
     TestThemeServiceRoundTrip();
     TestThemeServiceApply();
+    TestTodoServiceMatching();
     TestEditorSettingsRoundTrip();
     std::cout << "SlateCoreTests passed\n";
     return 0;
