@@ -7,7 +7,6 @@ namespace Software::Core::Runtime
 {
     class CommandRegistry;
     class EventBus;
-    class FeatureRegistry;
     class ServiceLocator;
     struct AppContext;
     class ToolRegistry;
@@ -31,11 +30,19 @@ namespace Software::Core::Runtime
     /** Registration surface exposed to modules. */
     struct ModuleContext
     {
+        /** Shared service registry used to publish or resolve cross-module services. */
         ServiceLocator& services;
+
+        /** Mode/tool registry used by route modules to register user-facing screens. */
         ToolRegistry& tools;
-        FeatureRegistry& features;
+
+        /** Event bus used for cross-module notifications without direct ownership. */
         EventBus& events;
+
+        /** Command registry used to expose actions to palettes, shortcuts, and modules. */
         CommandRegistry& commands;
+
+        /** Frame/application context shared with existing modes during migration. */
         AppContext& app;
     };
 
@@ -43,12 +50,18 @@ namespace Software::Core::Runtime
     class IModule
     {
     public:
+        /** Allows modules to clean up owned services through a base pointer. */
         virtual ~IModule() = default;
 
+        /** Returns stable module metadata before registration. */
         virtual ModuleDescriptor Describe() const = 0;
+        /** Registers services, commands, routes, panels, or jobs. */
         virtual void Register(ModuleContext& context) = 0;
+        /** Starts runtime behavior after all modules have registered. */
         virtual void Start(ModuleContext&) {}
+        /** Advances module-owned background work once per frame. */
         virtual void Update(ModuleContext&) {}
+        /** Stops runtime behavior before services are cleared. */
         virtual void Stop(ModuleContext&) {}
     };
 }

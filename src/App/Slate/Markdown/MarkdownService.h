@@ -44,6 +44,10 @@ namespace Software::Slate
                                            std::string_view title,
                                            std::string_view description,
                                            std::string* updatedText);
+        // Deletes one todo block from a document
+        static bool DeleteTodoTicketBlock(const std::string& text,
+                                          const TodoTicket& ticket,
+                                          std::string* updatedText);
 
     private:
         // Parses standard markdown links

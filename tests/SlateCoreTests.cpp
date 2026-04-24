@@ -485,6 +485,12 @@ namespace
               "#todo - [Done] - Ship compact todos #ux\r\n"
               "  Wrapped up\r\n"
               "After\r\n");
+
+        std::string deleted;
+        CHECK(Software::Slate::MarkdownService::DeleteTodoTicketBlock(text, summary.todos.front(), &deleted));
+        CHECK(deleted ==
+              "Intro\r\n"
+              "After\r\n");
     }
 
     void TestEditorDocumentReplaceActiveLineWithText()

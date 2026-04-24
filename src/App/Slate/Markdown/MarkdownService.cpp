@@ -127,6 +127,20 @@ namespace Software::Slate
             return text.size();
         }
 
+        std::size_t LineEndOffsetIncludingLineEnding(const std::string& text, std::size_t targetLine)
+        {
+            std::size_t end = LineEndOffsetForLine(text, targetLine);
+            if (end < text.size() && text[end] == '\r' && end + 1 < text.size() && text[end + 1] == '\n')
+            {
+                return end + 2;
+            }
+            if (end < text.size() && text[end] == '\n')
+            {
+                return end + 1;
+            }
+            return end;
+        }
+
         void AddSpan(std::vector<MarkdownInlineSpan>& spans,
                      std::string text,
                      bool bold,
@@ -612,6 +626,38 @@ namespace Software::Slate
         const std::string lineEnding = PathUtils::DetectLineEnding(text);
         std::string replacement = FormatTodoBlock(state, title, description, lineEnding);
         *updatedText = text.substr(0, start) + replacement + text.substr(end);
+        return true;
+    }
+
+    bool MarkdownService::DeleteTodoTicketBlock(const std::string& text,
+                                                const TodoTicket& ticket,
+                                                std::string* updatedText)
+    {
+        if (!updatedText || ticket.line == 0 || ticket.endLine < ticket.line)
+        {
+            return false;
+        }
+
+        const std::size_t start = LineOffsetForLine(text, ticket.line);
+        std::size_t end = LineEndOffsetIncludingLineEnding(text, ticket.endLine);
+        if (start > text.size() || end < start || end > text.size())
+        {
+            return false;
+        }
+
+        // Deleting the last block in a multi-line file should not leave a dangling blank line.
+        if (end == text.size() && start > 0 && text[start - 1] == '\n')
+        {
+            std::size_t adjustedStart = start - 1;
+            if (adjustedStart > 0 && text[adjustedStart - 1] == '\r')
+            {
+                --adjustedStart;
+            }
+            *updatedText = text.substr(0, adjustedStart) + text.substr(end);
+            return true;
+        }
+
+        *updatedText = text.substr(0, start) + text.substr(end);
         return true;
     }
 

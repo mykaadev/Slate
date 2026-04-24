@@ -188,7 +188,7 @@ namespace Software::Slate
         }
         if (m_listOpen)
         {
-            return "(tab) filter   (/) search   (enter) edit   (o) open   (esc) close";
+            return "(tab) filter   (/) search   (enter) edit   (o) open   (del/x) delete   (esc) close";
         }
         return {};
     }
@@ -285,6 +285,12 @@ namespace Software::Slate
             m_navigation.HasSelection() && !m_visibleTodos.empty())
         {
             BeginEdit(m_visibleTodos[m_navigation.Selected()]);
+            return;
+        }
+        if (allowInput && (IsKeyPressed(ImGuiKey_Delete) || IsKeyPressed(ImGuiKey_X)) &&
+            m_navigation.HasSelection() && !m_visibleTodos.empty())
+        {
+            DeleteSelected(context, callbacks);
             return;
         }
         if (allowInput && IsKeyPressed(ImGuiKey_O) && m_navigation.HasSelection() && !m_visibleTodos.empty())
@@ -666,10 +672,27 @@ namespace Software::Slate
         }
         else
         {
-            if (!UpdateTicket(context, m_form.ticket, state, title, description, callbacks))
+            auto* workspace = WorkspaceContext(context);
+            const auto todoService = context.services.Resolve<TodoService>();
+            if (!workspace || !todoService)
             {
+                SetError(callbacks, "todo service unavailable");
                 return false;
             }
+
+            TodoMutationResult result;
+            if (!todoService->UpdateTodo(*workspace,
+                                          m_form.ticket,
+                                          state,
+                                          title,
+                                          description,
+                                          context.frame.elapsedSeconds,
+                                          &result))
+            {
+                SetError(callbacks, result.error.empty() ? "could not update todo" : result.error);
+                return false;
+            }
+            RefreshEditorAfterMutation(context, result);
             SetStatus(callbacks, "todo updated");
         }
 
@@ -682,89 +705,55 @@ namespace Software::Slate
         return true;
     }
 
-    bool SlateTodoOverlayController::UpdateTicket(Software::Core::Runtime::AppContext& context,
-                                                  const TodoTicket& ticket,
-                                                  TodoState state,
-                                                  std::string_view title,
-                                                  std::string_view description,
-                                                  const TodoOverlayCallbacks& callbacks)
+    bool SlateTodoOverlayController::DeleteSelected(Software::Core::Runtime::AppContext& context,
+                                                      const TodoOverlayCallbacks& callbacks)
     {
-        auto* workspace = WorkspaceContext(context);
-        auto* editor = EditorContext(context);
-        if (!workspace || !editor)
+        if (!m_navigation.HasSelection() || m_visibleTodos.empty())
         {
             return false;
         }
 
-        auto& documents = workspace->Documents();
-        const auto normalized = PathUtils::NormalizeRelative(ticket.relativePath);
-        auto* active = documents.Active();
-        std::string updatedText;
-        std::string preservedTitle = PathUtils::Trim(title);
-        for (const auto& tag : ticket.tags)
+        auto* workspace = WorkspaceContext(context);
+        const auto todoService = context.services.Resolve<TodoService>();
+        if (!workspace || !todoService)
         {
-            if (tag.empty() || tag == "todo")
-            {
-                continue;
-            }
-            const std::string token = "#" + tag;
-            if (!ContainsFilter(preservedTitle, token.c_str()))
-            {
-                if (!preservedTitle.empty())
-                {
-                    preservedTitle += " ";
-                }
-                preservedTitle += token;
-            }
+            SetError(callbacks, "todo service unavailable");
+            return false;
         }
 
-        if (active && PathUtils::NormalizeRelative(active->relativePath) == normalized)
+        TodoMutationResult result;
+        const auto todo = m_visibleTodos[m_navigation.Selected()];
+        if (!todoService->DeleteTodo(*workspace, todo, context.frame.elapsedSeconds, &result))
         {
-            if (!MarkdownService::ReplaceTodoTicketBlock(active->text,
-                                                         ticket,
-                                                         state,
-                                                         preservedTitle,
-                                                         description,
-                                                         &updatedText))
-            {
-                SetError(callbacks, "could not update todo");
-                return false;
-            }
-
-            active->text = updatedText;
-            documents.MarkEdited(context.frame.elapsedSeconds);
-            editor->LoadFromActiveDocument(documents);
-            editor->JumpToLine(ticket.line);
-        }
-        else
-        {
-            std::string text;
-            std::string error;
-            const auto absolutePath = workspace->Workspace().Resolve(normalized);
-            if (!DocumentService::ReadTextFile(absolutePath, &text, &error))
-            {
-                SetError(callbacks, error);
-                return false;
-            }
-            if (!MarkdownService::ReplaceTodoTicketBlock(text,
-                                                         ticket,
-                                                         state,
-                                                         preservedTitle,
-                                                         description,
-                                                         &updatedText))
-            {
-                SetError(callbacks, "could not update todo");
-                return false;
-            }
-            if (!DocumentService::AtomicWriteText(absolutePath, updatedText, &error))
-            {
-                SetError(callbacks, error);
-                return false;
-            }
+            SetError(callbacks, result.error.empty() ? "could not delete todo" : result.error);
+            return false;
         }
 
-        workspace->Workspace().Scan(nullptr);
-        workspace->Search().Rebuild(workspace->Workspace());
+        RefreshEditorAfterMutation(context, result);
+        SetStatus(callbacks, "todo deleted");
+        if (!m_visibleTodos.empty())
+        {
+            m_navigation.SetSelected(std::min(m_navigation.Selected(), m_visibleTodos.size() - 1));
+        }
         return true;
+    }
+
+    void SlateTodoOverlayController::RefreshEditorAfterMutation(Software::Core::Runtime::AppContext& context,
+                                                                const TodoMutationResult& result)
+    {
+        if (!result.touchedActiveDocument)
+        {
+            return;
+        }
+
+        auto* workspace = WorkspaceContext(context);
+        auto* editor = EditorContext(context);
+        if (!workspace || !editor)
+        {
+            return;
+        }
+
+        editor->LoadFromActiveDocument(workspace->Documents());
+        editor->JumpToLine(result.revealLine);
     }
 }

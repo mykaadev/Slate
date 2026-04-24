@@ -114,7 +114,7 @@ namespace Software::Modes::Slate
         case Software::Slate::SlateBrowserView::Recent:
             return "(up/down) move   (enter) open   (/) search   (n) new   (esc) home";
         case Software::Slate::SlateBrowserView::Library:
-            return "(up/down) move   (left/right) fold   (enter) open   (/) filter   (esc) home";
+            return "(up/down) move   (left/right) tree nav   (enter) open   (/) filter   (esc) home";
         case Software::Slate::SlateBrowserView::FileTree:
             if (ui.folderPickerActive && ui.folderPickerAction == Software::Slate::FolderPickerAction::MoveDestination)
             {
@@ -559,13 +559,76 @@ namespace Software::Modes::Slate
         {
             ui.navigation.MovePrevious();
         }
+        auto hasVisibleChild = [&]()
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return false;
+            }
+            const std::size_t selectedIndex = ui.navigation.Selected();
+            return selectedIndex + 1 < ui.treeRows.size() && ui.treeRows[selectedIndex + 1].depth > ui.treeRows[selectedIndex].depth;
+        };
+        auto isCollapsedSelection = [&]()
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return false;
+            }
+            const auto& selectedRow = ui.treeRows[ui.navigation.Selected()];
+            if (!selectedRow.isDirectory)
+            {
+                return false;
+            }
+            return ui.collapsedFolders.find(Software::Slate::TreePathKey(selectedRow.relativePath)) != ui.collapsedFolders.end();
+        };
+        auto parentIndex = [&]() -> std::size_t
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return ui.treeRows.size();
+            }
+            const std::size_t selectedIndex = ui.navigation.Selected();
+            const int selectedDepth = ui.treeRows[selectedIndex].depth;
+            if (selectedDepth <= 0)
+            {
+                return ui.treeRows.size();
+            }
+            for (std::size_t scan = selectedIndex; scan > 0; --scan)
+            {
+                const std::size_t candidateIndex = scan - 1;
+                if (ui.treeRows[candidateIndex].depth < selectedDepth)
+                {
+                    return candidateIndex;
+                }
+            }
+            return ui.treeRows.size();
+        };
+
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
         {
-            ToggleSelectedFolder(context, true);
+            if (isCollapsedSelection())
+            {
+                ToggleSelectedFolder(context, true);
+            }
+            else if (hasVisibleChild())
+            {
+                ui.navigation.SetSelected(ui.navigation.Selected() + 1);
+            }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
         {
-            ToggleSelectedFolder(context, false);
+            if (!isCollapsedSelection() && hasVisibleChild())
+            {
+                ToggleSelectedFolder(context, false);
+            }
+            else
+            {
+                const std::size_t selectedParentIndex = parentIndex();
+                if (selectedParentIndex < ui.treeRows.size())
+                {
+                    ui.navigation.SetSelected(selectedParentIndex);
+                }
+            }
         }
         if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
         {
@@ -628,13 +691,76 @@ namespace Software::Modes::Slate
         {
             ui.navigation.MovePrevious();
         }
+        auto hasVisibleChild = [&]()
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return false;
+            }
+            const std::size_t selectedIndex = ui.navigation.Selected();
+            return selectedIndex + 1 < ui.treeRows.size() && ui.treeRows[selectedIndex + 1].depth > ui.treeRows[selectedIndex].depth;
+        };
+        auto isCollapsedSelection = [&]()
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return false;
+            }
+            const auto& selectedRow = ui.treeRows[ui.navigation.Selected()];
+            if (!selectedRow.isDirectory)
+            {
+                return false;
+            }
+            return ui.collapsedFolders.find(Software::Slate::TreePathKey(selectedRow.relativePath)) != ui.collapsedFolders.end();
+        };
+        auto parentIndex = [&]() -> std::size_t
+        {
+            if (!ui.navigation.HasSelection() || ui.treeRows.empty())
+            {
+                return ui.treeRows.size();
+            }
+            const std::size_t selectedIndex = ui.navigation.Selected();
+            const int selectedDepth = ui.treeRows[selectedIndex].depth;
+            if (selectedDepth <= 0)
+            {
+                return ui.treeRows.size();
+            }
+            for (std::size_t scan = selectedIndex; scan > 0; --scan)
+            {
+                const std::size_t candidateIndex = scan - 1;
+                if (ui.treeRows[candidateIndex].depth < selectedDepth)
+                {
+                    return candidateIndex;
+                }
+            }
+            return ui.treeRows.size();
+        };
+
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
         {
-            ToggleSelectedFolder(context, true);
+            if (isCollapsedSelection())
+            {
+                ToggleSelectedFolder(context, true);
+            }
+            else if (hasVisibleChild())
+            {
+                ui.navigation.SetSelected(ui.navigation.Selected() + 1);
+            }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
         {
-            ToggleSelectedFolder(context, false);
+            if (!isCollapsedSelection() && hasVisibleChild())
+            {
+                ToggleSelectedFolder(context, false);
+            }
+            else
+            {
+                const std::size_t selectedParentIndex = parentIndex();
+                if (selectedParentIndex < ui.treeRows.size())
+                {
+                    ui.navigation.SetSelected(selectedParentIndex);
+                }
+            }
         }
         if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
         {
@@ -702,18 +828,236 @@ namespace Software::Modes::Slate
             return;
         }
 
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float indentStep = 20.0f;
+        const float railOffset = 10.0f;
+        const float rowPaddingY = 2.0f;
+        const float rowCornerRounding = 6.0f;
+        const float rowInsetX = 6.0f;
+        const float indentHighlightInset = 2.0f;
+        const float iconSize = 10.0f;
+        const float iconGap = 9.0f;
+        const float rowLeadX = 18.0f;
+        const ImU32 railColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Muted.x, Muted.y, Muted.z, 0.50f));
+        const ImU32 activeBranchColor = ImGui::ColorConvertFloat4ToU32(Green);
+        const ImU32 matchBranchColor = ImGui::ColorConvertFloat4ToU32(Amber);
+        const ImU32 selectedRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, 0.18f));
+        const ImU32 hoveredRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.08f));
+        const ImU32 matchRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Amber.x, Amber.y, Amber.z, 0.08f));
+        const std::size_t activeIndex = ui.navigation.Selected() < ui.treeRows.size() ? ui.navigation.Selected()
+                                                                                        : ui.treeRows.size();
+        const Software::Slate::TreeViewRow* activeRow = activeIndex < ui.treeRows.size() ? &ui.treeRows[activeIndex] : nullptr;
+        std::vector<Software::Slate::fs::path> activeLineagePaths;
+        std::vector<std::size_t> activeLineageRowIndices;
+        if (activeRow != nullptr)
+        {
+            Software::Slate::fs::path current;
+            for (const auto& part : activeRow->relativePath)
+            {
+                current /= part;
+                activeLineagePaths.push_back(current);
+                activeLineageRowIndices.push_back(activeIndex);
+            }
+
+            for (std::size_t depth = 0; depth < activeLineagePaths.size(); ++depth)
+            {
+                for (std::size_t rowIndex = 0; rowIndex < ui.treeRows.size(); ++rowIndex)
+                {
+                    if (ui.treeRows[rowIndex].relativePath == activeLineagePaths[depth])
+                    {
+                        activeLineageRowIndices[depth] = rowIndex;
+                        break;
+                    }
+                }
+            }
+        }
+
+        auto subtreeContinuesPastRow = [&](std::size_t rowIndex, int depthLevel)
+        {
+            for (std::size_t next = rowIndex + 1; next < ui.treeRows.size(); ++next)
+            {
+                const int nextDepth = ui.treeRows[next].depth;
+                if (nextDepth < depthLevel)
+                {
+                    return false;
+                }
+                if (nextDepth >= depthLevel)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        auto isDescendantOrSelf = [&](const Software::Slate::fs::path& candidate, const Software::Slate::fs::path& ancestor)
+        {
+            return candidate == ancestor || Software::Slate::PathIsDescendantOf(candidate, ancestor);
+        };
+
+        auto isOnActiveLineage = [&](const Software::Slate::TreeViewRow& row)
+        {
+            return activeRow != nullptr && isDescendantOrSelf(activeRow->relativePath, row.relativePath);
+        };
+
+        auto shouldAccentRailAtDepth = [&](std::size_t rowIndex, const Software::Slate::TreeViewRow& row, int depth)
+        {
+            if (activeRow == nullptr || depth < 0 || static_cast<std::size_t>(depth) >= activeLineagePaths.size())
+            {
+                return false;
+            }
+
+            const Software::Slate::fs::path& ancestorPath = activeLineagePaths[static_cast<std::size_t>(depth)];
+            const std::size_t ancestorRowIndex = activeLineageRowIndices[static_cast<std::size_t>(depth)];
+            return rowIndex > ancestorRowIndex && rowIndex <= activeIndex && isDescendantOrSelf(row.relativePath, ancestorPath);
+        };
+
         for (std::size_t i = 0; i < ui.treeRows.size(); ++i)
         {
             const auto& row = ui.treeRows[i];
-            const bool selected = i == ui.navigation.Selected();
-            const std::string indent(static_cast<std::size_t>(std::max(0, row.depth)) * 2, ' ');
-            const bool collapsed =
-                row.isDirectory && ui.collapsedFolders.find(Software::Slate::TreePathKey(row.relativePath)) !=
-                                       ui.collapsedFolders.end();
-            const char* marker = selected ? ">" : " ";
-            const char* type = row.isDirectory ? (collapsed ? "[+]" : "[-]") : "   ";
-            const ImVec4 color = selected ? Green : (row.matchedFilter ? Amber : Primary);
-            ImGui::TextColored(color, "%s %s%s %s", marker, indent.c_str(), type, DisplayNameForTreeRow(row).c_str());
+            const bool selected = i == activeIndex;
+            const bool onActiveLineage = isOnActiveLineage(row);
+            const float lineageAlpha = std::clamp(0.05f + static_cast<float>(std::max(0, row.depth)) * 0.028f, 0.05f, 0.16f);
+            const ImVec4 color = selected ? Green
+                                          : (onActiveLineage ? ImVec4(Green.x, Green.y, Green.z, 0.90f)
+                                                             : (row.matchedFilter ? Amber : Primary));
+            const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+            const float rowHeight = ImGui::GetTextLineHeightWithSpacing() + 2.0f;
+            const float rowMidY = rowStart.y + rowHeight * 0.5f;
+            const float rowBottomY = rowStart.y + rowHeight - rowPaddingY;
+            const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+            const float rowLeftX = rowStart.x + rowInsetX;
+            const float rowRightX = rowStart.x + rowWidth - rowInsetX;
+            const float baseX = rowStart.x + rowLeadX;
+            const float iconX = rowStart.x + static_cast<float>(std::max(0, row.depth)) * indentStep + 22.0f;
+            const float textX = iconX + iconSize + iconGap;
+            const float lineageStartX = std::min(rowRightX - 18.0f, rowLeftX + indentHighlightInset + static_cast<float>(std::max(0, row.depth)) * indentStep);
+
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::SetCursorScreenPos(rowStart);
+            ImGui::InvisibleButton("##TreeRow", ImVec2(rowWidth, rowHeight));
+            const bool hovered = ImGui::IsItemHovered();
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
+                ui.navigation.SetSelected(i);
+            }
+            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                ui.navigation.SetSelected(i);
+                ActivateSelectedTreeRow(context);
+            }
+            ImGui::PopID();
+
+            const ImU32 rowFillColor = selected ? selectedRowColor
+                                                : (hovered ? hoveredRowColor
+                                                           : (onActiveLineage
+                                                                  ? ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, lineageAlpha))
+                                                                  : (row.matchedFilter ? matchRowColor : 0U)));
+            if (rowFillColor != 0U)
+            {
+                const float fillLeftX = (selected || onActiveLineage) ? lineageStartX : rowLeftX;
+                drawList->AddRectFilled(ImVec2(fillLeftX, rowStart.y + 1.0f),
+                                        ImVec2(rowRightX, rowStart.y + rowHeight - 1.0f),
+                                        rowFillColor,
+                                        rowCornerRounding);
+            }
+
+            if (selected || onActiveLineage)
+            {
+                const ImU32 markerColor = selected ? activeBranchColor : ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, std::min(0.85f, lineageAlpha + 0.25f)));
+                drawList->AddLine(ImVec2(lineageStartX + 1.0f, rowStart.y + 4.0f),
+                                  ImVec2(lineageStartX + 1.0f, rowStart.y + rowHeight - 4.0f),
+                                  markerColor,
+                                  selected ? 2.4f : 1.6f);
+            }
+
+            for (int depth = 0; depth < row.depth; ++depth)
+            {
+                if (!subtreeContinuesPastRow(i, depth + 1))
+                {
+                    continue;
+                }
+
+                const float x = baseX + static_cast<float>(depth) * indentStep + railOffset;
+                const bool accentRail = shouldAccentRailAtDepth(i, row, depth);
+                drawList->AddLine(ImVec2(x, rowStart.y + rowPaddingY),
+                                  ImVec2(x, rowBottomY),
+                                  accentRail ? activeBranchColor : railColor,
+                                  accentRail ? 1.8f : 1.15f);
+            }
+
+            if (row.depth > 0)
+            {
+                const float railX = baseX + static_cast<float>(row.depth - 1) * indentStep + railOffset;
+                const float branchEndX = iconX - 5.0f;
+                const bool continueBelow = subtreeContinuesPastRow(i, row.depth);
+                const ImU32 branchColor = selected || onActiveLineage
+                                              ? activeBranchColor
+                                              : (row.matchedFilter ? matchBranchColor : railColor);
+                const float branchThickness = selected || onActiveLineage ? 2.0f : (row.matchedFilter ? 1.55f : 1.15f);
+
+                drawList->AddLine(ImVec2(railX, rowStart.y + rowPaddingY),
+                                  ImVec2(railX, rowMidY),
+                                  branchColor,
+                                  branchThickness);
+                if (continueBelow)
+                {
+                    const bool accentBelow = shouldAccentRailAtDepth(i, row, row.depth - 1);
+                    drawList->AddLine(ImVec2(railX, rowMidY),
+                                      ImVec2(railX, rowBottomY),
+                                      accentBelow ? activeBranchColor : railColor,
+                                      accentBelow ? 1.8f : 1.15f);
+                }
+
+                drawList->AddBezierCubic(ImVec2(railX, rowMidY),
+                                         ImVec2(railX + indentStep * 0.18f, rowMidY),
+                                         ImVec2(branchEndX - indentStep * 0.20f, rowMidY),
+                                         ImVec2(branchEndX, rowMidY),
+                                         branchColor,
+                                         branchThickness,
+                                         16);
+            }
+
+            const ImU32 iconColor = selected || onActiveLineage
+                                        ? activeBranchColor
+                                        : (row.matchedFilter ? matchBranchColor : ImGui::ColorConvertFloat4ToU32(ImVec4(Primary.x, Primary.y, Primary.z, 0.88f)));
+            const ImVec2 iconMin(iconX, rowMidY - iconSize * 0.5f);
+            const ImVec2 iconMax(iconX + iconSize, rowMidY + iconSize * 0.5f);
+            if (row.isDirectory)
+            {
+                const ImVec2 tabMin(iconMin.x + 1.5f, iconMin.y - 0.5f);
+                const ImVec2 tabMax(iconMin.x + 5.6f, iconMin.y + 2.8f);
+                const ImVec2 bodyMin(iconMin.x + 0.8f, iconMin.y + 1.2f);
+                const ImVec2 bodyMax(iconMax.x - 0.6f, iconMax.y - 0.6f);
+                drawList->AddRectFilled(bodyMin,
+                                        bodyMax,
+                                        ImGui::ColorConvertFloat4ToU32(ImVec4(Primary.x, Primary.y, Primary.z, selected || onActiveLineage ? 0.10f : 0.05f)),
+                                        2.0f);
+                drawList->AddRect(bodyMin, bodyMax, iconColor, 2.0f, 0, selected || onActiveLineage ? 1.6f : 1.25f);
+                drawList->AddRectFilled(tabMin,
+                                        tabMax,
+                                        ImGui::ColorConvertFloat4ToU32(ImVec4(Primary.x, Primary.y, Primary.z, selected || onActiveLineage ? 0.12f : 0.06f)),
+                                        1.6f);
+                drawList->AddRect(tabMin, tabMax, iconColor, 1.6f, 0, selected || onActiveLineage ? 1.5f : 1.15f);
+            }
+            else
+            {
+                const ImVec2 center(iconMin.x + iconSize * 0.5f, rowMidY);
+                drawList->AddCircleFilled(center, 2.3f, iconColor, 16);
+                if (selected || onActiveLineage)
+                {
+                    drawList->AddCircle(center, 4.1f, iconColor, 16, 1.2f);
+                }
+            }
+
+            std::string label = DisplayNameForTreeRow(row);
+            if (row.isDirectory && label != ".")
+            {
+                label += "/";
+            }
+
+            drawList->AddText(ImVec2(textX, rowStart.y + 1.0f),
+                              ImGui::ColorConvertFloat4ToU32(color),
+                              label.c_str());
         }
         ImGui::EndChild();
     }

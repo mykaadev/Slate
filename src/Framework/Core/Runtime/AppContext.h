@@ -11,7 +11,6 @@
 namespace Software::Core::Runtime
 {
     class ToolRegistry;
-    class FeatureRegistry;
 
     /** Frame timing snapshot. */
     struct FrameInfo
@@ -26,7 +25,7 @@ namespace Software::Core::Runtime
         std::uint64_t frameIndex = 0;
     };
 
-    /** Lightweight view exposing the application backbone to modes/features/panels. */
+    /** Lightweight view exposing the application backbone to modes, modules, and panels. */
     struct AppContext
     {
         /** Shared service locator. */
@@ -34,9 +33,6 @@ namespace Software::Core::Runtime
 
         /** Registry of available tools. */
         ToolRegistry& tools;
-
-        /** Registry of available features. */
-        FeatureRegistry& features;
 
         /** Event bus used for decoupled messaging. */
         EventBus& events;

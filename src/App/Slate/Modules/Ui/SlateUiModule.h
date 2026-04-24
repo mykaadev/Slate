@@ -17,12 +17,17 @@ namespace Software::Slate::Modules
     class SlateUiModule final : public Software::Core::Runtime::IModule
     {
     public:
+        /** Returns module identity for shared UI state. */
         Software::Core::Runtime::ModuleDescriptor Describe() const override;
+        /** Creates and registers UI state plus module-owned overlays. */
         void Register(Software::Core::Runtime::ModuleContext& context) override;
 
     private:
+        /** Shared UI state kept while old route adapters are migrated. */
         std::shared_ptr<Software::Slate::SlateUiState> m_state;
+        /** Search overlay controller owned by the UI module. */
         std::shared_ptr<Software::Slate::SlateSearchOverlayController> m_searchOverlay;
+        /** Workspace switcher overlay owned by the UI module. */
         std::shared_ptr<Software::Slate::SlateWorkspaceSwitcherOverlay> m_workspaceSwitcherOverlay;
     };
 }

@@ -10,7 +10,6 @@ The core runtime owns these registries:
 - `EventBus` — decoupled notifications.
 - `CommandRegistry` — stable command ids, aliases, and optional executors.
 - `ModuleRegistry` — loads, starts, ticks, and stops app modules.
-- `FeatureRegistry` — compatibility layer for old feature-style code.
 - `ToolRegistry` — current route/mode adapter.
 
 ## Module contract
@@ -45,7 +44,7 @@ public:
 - `slate.routes` — registers existing Slate modes as route adapters.
 - `slate.startup` — chooses the initial route after services are live.
 
-The old Slate feature classes still exist for compatibility/reference, but they are no longer the default owner of workspace/editor/UI services.
+The old feature compatibility layer has been removed from the app runtime. New behavior should enter through modules, commands, services, overlays, or routes.
 
 ## Command contract
 
@@ -106,9 +105,9 @@ Shared overlays are now module-owned services instead of private `SlateModeBase`
 
 ## Segmentation pass: todo overlay extraction
 
-The legacy Slate feature adapters have been removed from the application target. Slate services are now registered through modules instead of through `src/Features/Slate/*` wrappers.
+The legacy feature runtime has been removed. Slate services are now registered through modules instead of through feature wrappers.
 
-`SlateModeBase` should remain a shell adapter only. The todo list, todo form state, todo keyboard navigation, todo filtering, slash-command replacement, markdown block insertion, and todo ticket rewrite logic now live in `SlateTodoOverlayController`, registered by `SlateTodoModule`.
+`SlateModeBase` should remain a shell adapter only. The todo list, todo form state, todo keyboard navigation, todo filtering, and slash-command replacement live in `SlateTodoOverlayController`, registered by `SlateTodoModule`. Todo collection, update, and deletion live in `TodoService`, so markdown todo mutations stay in the todo module domain layer rather than in the overlay.
 
 Current ownership split:
 

@@ -5,17 +5,16 @@
 namespace Software::Core::Runtime
 {
     class ToolRegistry;
-    class FeatureRegistry;
     struct AppContext;
 
-    /** Dispatches raw input events to the active mode followed by enabled features. */
+    /** Dispatches raw input events to the active mode/tool. */
     class InputRouter
     {
     // Functions
     public:
 
         /** Binds registries for dispatch. */
-        void Bind(ToolRegistry* tools, FeatureRegistry* features);
+        void Bind(ToolRegistry* tools);
         
         /** Updates the shared application context pointer. */
         void SetContext(AppContext* context);
@@ -37,9 +36,6 @@ namespace Software::Core::Runtime
 
         /** Active tool registry used for mode input. */
         ToolRegistry* m_tools = nullptr;
-
-        /** Active feature registry used for feature input. */
-        FeatureRegistry* m_features = nullptr;
 
         /** Current application context. */
         AppContext* m_context = nullptr;

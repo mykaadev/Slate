@@ -11,7 +11,6 @@
 #include "App/DefaultModules/DefaultModules.h"
 #include "Core/Runtime/CommandRegistry.h"
 #include "Core/Runtime/EventBus.h"
-#include "Core/Runtime/FeatureRegistry.h"
 #include "Core/Runtime/InputRouter.h"
 #include "Core/Runtime/ModuleRegistry.h"
 #include "Core/Runtime/ServiceLocator.h"
@@ -31,15 +30,14 @@ namespace Software::Core::App
             return -1;
         }
 
-        // Shared registries used across modules, features, and modes
+        // Shared registries used across modules and modes
         Software::Core::Runtime::ServiceLocator services;
         Software::Core::Runtime::ToolRegistry tools;
-        Software::Core::Runtime::FeatureRegistry features;
         Software::Core::Runtime::EventBus events;
         Software::Core::Runtime::CommandRegistry commands;
         Software::Core::Runtime::ModuleRegistry modules;
         Software::Core::Runtime::InputRouter inputRouter;
-        inputRouter.Bind(&tools, &features);
+        inputRouter.Bind(&tools);
         platform.SetInputRouter(&inputRouter);
 
         // Collects dropped files until the editor consumes them
@@ -49,8 +47,8 @@ namespace Software::Core::App
         });
 
         // Carries shared state through the app
-        Software::Core::Runtime::AppContext context{services, tools, features, events, commands, {}, false, &droppedFiles};
-        Software::Core::Runtime::ModuleContext moduleContext{services, tools, features, events, commands, context};
+        Software::Core::Runtime::AppContext context{services, tools, events, commands, {}, false, &droppedFiles};
+        Software::Core::Runtime::ModuleContext moduleContext{services, tools, events, commands, context};
         services.Register<Software::Platform::PlatformWindowService>(
             std::make_shared<Software::Platform::PlatformWindowService>(platform.NativeWindowHandle()));
         Software::App::DefaultModules::Register(modules, moduleContext, context);
@@ -79,15 +77,12 @@ namespace Software::Core::App
 
             // Updates state before drawing
             modules.UpdateAll(moduleContext);
-            features.Update(context);
             tools.Update(context);
 
             // Draws any world space content first
-            features.DrawWorld(context);
             tools.DrawWorld(context);
 
             // Draws the UI after world content
-            features.DrawUI(context);
             tools.DrawUI(context);
 
             platform.EndFrame();

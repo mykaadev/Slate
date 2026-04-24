@@ -15,10 +15,13 @@ namespace Software::Slate::Modules
     class SlateEditorModule final : public Software::Core::Runtime::IModule
     {
     public:
+        /** Returns module identity for editor services. */
         Software::Core::Runtime::ModuleDescriptor Describe() const override;
+        /** Creates and registers the shared editor context. */
         void Register(Software::Core::Runtime::ModuleContext& context) override;
 
     private:
+        /** Shared editor context owned by the module. */
         std::shared_ptr<Software::Slate::SlateEditorContext> m_editor;
     };
 }

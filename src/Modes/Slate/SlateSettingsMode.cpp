@@ -405,7 +405,14 @@ namespace Software::Modes::Slate
         ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
 
         const float contentHeight = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
-        ImGui::BeginChild("SettingsScroll", ImVec2(0.0f, contentHeight), false,
+        const float layoutWidth = CenteredColumnWidth(1180.0f);
+        const float gap = 24.0f;
+        const float previewWidth = std::clamp(layoutWidth * 0.38f, 360.0f, 460.0f);
+        const float settingsWidth = std::max(420.0f, layoutWidth - previewWidth - gap);
+        SetCursorCenteredForWidth(layoutWidth);
+
+        ImGui::BeginGroup();
+        ImGui::BeginChild("SettingsScroll", ImVec2(settingsWidth, contentHeight), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
         ImGui::TextColored(Cyan, "settings");
@@ -461,7 +468,14 @@ namespace Software::Modes::Slate
         ImGui::Dummy(ImVec2(1.0f, 14.0f));
         ImGui::Separator();
         ImGui::Dummy(ImVec2(1.0f, 8.0f));
+        ImGui::TextColored(Muted, "Editor settings save to .slate/editor.tsv. Appearance choices save to .slate/theme.tsv.");
+        ImGui::EndChild();
+
+        ImGui::SameLine(0.0f, gap);
+        ImGui::BeginChild("SettingsPreviewPanel", ImVec2(previewWidth, contentHeight), true,
+                          ImGuiWindowFlags_NoBackground);
         ImGui::TextColored(Muted, "preview");
+        ImGui::Separator();
         ImGui::Dummy(ImVec2(1.0f, 6.0f));
 
         bool previewInCodeFence = false;
@@ -483,11 +497,8 @@ namespace Software::Modes::Slate
         DrawMarkdownLine("![](assets/encounter/board.png)", previewInCodeFence, false, false, previewFontScale);
         ImGui::PopStyleVar();
         ImGui::SetWindowFontScale(1.0f);
-
-        ImGui::Dummy(ImVec2(1.0f, 10.0f));
-        ImGui::TextColored(Muted, "Editor settings save to .slate/editor.tsv. Appearance choices save to .slate/theme.tsv.");
-
         ImGui::EndChild();
+        ImGui::EndGroup();
     }
 
     std::string SlateSettingsMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
