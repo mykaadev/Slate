@@ -6,7 +6,7 @@
   </a>
 </h1>
 
-<h4 align="center">A quiet local-first text editor for Markdown, todo lists, and daily journaling</h4>
+<h4 align="center">A quiet local-first text editor for Markdown, todos, and daily journaling</h4>
 
 <p align="center">
   <a href="https://github.com/mykaadev/Slate/commits/main"><img src="https://img.shields.io/github/last-commit/mykaadev/Slate?style=plastic&logo=github&logoColor=white" alt="GitHub Last Commit"></a>
@@ -20,12 +20,11 @@
   <a href="#-summary">🌳 Summary</a> •
   <a href="#-why-slate">🎯 Why</a> •
   <a href="#-features">✨ Features</a> •
-  <a href="#-getting-started">🚀 Getting Started</a> •
+  <a href="#-quick-start">🚀 Quick Start</a> •
+  <a href="#-workflows">🪴 Workflows</a> •
   <a href="#-configuration">🧩 Configuration</a> •
-  <a href="#-how-it-works">🧠 How it works</a> •
-  <a href="#-best-practices">📚 Best practices</a> •
-  <a href="#-requirements">⚙️ Requirements</a> •
-  <a href="#-installation">🛠️ Installation</a>
+  <a href="#-how-it-works">🧠 How It Works</a> •
+  <a href="#-building">🛠️ Building</a>
 </p>
 
 <p align="center">
@@ -38,38 +37,42 @@
 
 ## 🌳 Summary
 
-**Slate** is a lightweight desktop text editor built for people who want calm, local, portable writing.  
-It uses normal Markdown files inside a workspace folder you already own, with a distraction-free flow for notes, daily journal entries, and todo tracking.
+**Slate** is a lightweight desktop writing space built around local Markdown files.
+It is designed for notes, daily journal entries, todo tracking, and calm workspace navigation without accounts, servers, or lock-in.
 
 <table>
   <tr>
-    <td><b>local-first</b> instead of account-first</td>
-    <td><b>plain files</b> instead of a locked database</td>
-    <td><b>focused UI</b> instead of a giant workspace operating system</td>
+    <td><b>local-first</b><br>your workspace is a folder</td>
+    <td><b>plain Markdown</b><br>portable, readable, syncable</td>
+    <td><b>quiet UI</b><br>fast, focused, keyboard-friendly</td>
   </tr>
 </table>
 
 <div align="center">
-  <img src="https://github.com/mykaadev/Slate/blob/main/resources/LandingPage.png" width="700" alt="Landing Page" />
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/LandingPage.png" width="700" alt="Slate landing page" />
 </div>
 
 <br>
 
 <table>
   <tr>
-    <th align="left">Default idea</th>
-    <th align="left">File ownership</th>
+    <th align="left">Slate is for</th>
+    <th align="left">Slate is not trying to be</th>
   </tr>
   <tr>
     <td>
-      write notes<br>
-      open today’s journal fast<br>
-      keep todos close to the notes they belong to<br>
-      stay out of the way
+      calm Markdown writing<br>
+      daily notes and reflection<br>
+      todos that stay close to context<br>
+      fast local workspace navigation<br>
+      durable files you can back up yourself
     </td>
     <td>
-      <b>Your files stay yours:</b> Slate stores notes as regular <code>.md</code> files in a normal workspace folder.<br><br>
-      No account is required, and sync can be handled however the user wants.
+      a cloud platform<br>
+      a locked note database<br>
+      a social productivity app<br>
+      a giant workspace operating system<br>
+      an account-first writing tool
     </td>
   </tr>
 </table>
@@ -78,61 +81,70 @@ It uses normal Markdown files inside a workspace folder you already own, with a 
 
 ## 🎯 Why Slate
 
-A lot of writing tools split in two directions:
+Most writing tools drift toward one of two extremes:
 
 | Too small | Too much |
 | --- | --- |
-| too bare and disposable | too heavy and overbuilt |
+| disposable scratchpad | heavy workspace platform |
+| little structure | too many systems |
+| easy to lose context | hard to simply start writing |
 
-Slate aims for the middle.
+Slate aims for the middle: a quiet Markdown notebook with just enough structure for daily work.
 
-It is meant to feel like:
+> Open a workspace. Write. Search. Journal. Track todos. Keep your files.
 
-| Slate should feel like... |
-| --- |
-| a quiet writing space |
-| a dependable Markdown notebook |
-| a light todo layer |
-| a journaling tool that does not turn into a productivity circus |
-
-The goal is not to compete with giant note platforms.  
-The goal is to make opening a workspace and writing feel immediate, calm, and durable.
+The goal is not to compete with giant note platforms. The goal is to make writing feel immediate, calm, and durable.
 
 ---
 
 ## ✨ Features
 
+### Writing and navigation
+
 | Feature | What it does |
 | --- | --- |
-| **Local-first Markdown workspace** | Notes live as regular `.md` files in folders you control.<br>No server, no account, no lock-in. |
-| **Distraction-free home flow** | Fast keyboard-first navigation for writing, browsing, search, and settings.<br>Built around a quiet full-screen desktop workflow. |
-| **Daily journal mode** | Jump straight into today’s entry.<br>Daily notes are created automatically under:<br><br>`Journal/YYYY/MM/YYYY-MM-DD.md` |
-| **Markdown editing + preview** | Write in the editor, open a rendered preview, and inspect a heading outline.<br>Supports headings, code blocks, links, images, tags, and inline styling. |
-| **Todo blocks inside Markdown** | Todos stay in your notes instead of a separate app.<br>Built-in todo states: `Open`, `Research`, `Doing`, `Done`.<br>Workspace todo overlay lets you filter and search across notes. |
-| **Fast workspace search** | Search by file names, full note text, or recent files.<br>Quick-open style workflow for moving around large note folders. |
-| **Multiple workspaces** | Create, register, and switch between local workspaces.<br>Each workspace can have its own title, emoji, theme, and editor settings. |
-| **File tree + library views** | Browse the full workspace tree.<br>Keep journal content separate from your broader note library when needed. |
-| **Wiki links and Markdown links** | Works with both `[[Wiki Links]]` and standard Markdown links.<br>Renaming or moving notes can update internal links across the workspace. |
-| **Recovery, history, and external-change awareness** | Detects newer recovery data.<br>Warns when a note changed on disk outside the editor.<br>Writes local history snapshots for safer file operations. |
-| **Theme presets** | Separate shell and Markdown appearance presets.<br>Workspace-level settings make it easy to keep a preferred writing environment. |
-| **Image-friendly note workflow** | Markdown image rendering in preview.<br>Supports inserting dropped image files.<br>Clipboard image paste is available on Windows. |
-| **Portable packaging** | Includes a terminal target for building a portable Windows zip. |
+| **Local-first Markdown workspace** | Notes live as regular `.md` files in folders you control. No account, server, or lock-in. |
+| **Distraction-free home flow** | Keyboard-first navigation for writing, browsing, search, todos, workspaces, and settings. |
+| **Markdown editing + preview** | Edit Markdown, open rendered preview, and inspect a heading outline. Supports headings, code blocks, links, images, tags, and inline styling. |
+| **File tree + library views** | Browse a full workspace tree, move through nested folders, and keep journal content separate from broader notes when useful. |
+| **Fast workspace search** | Search file names, note text, and recent files with quick-open style navigation. |
+
+### Journaling and todos
+
+| Feature | What it does |
+| --- | --- |
+| **Daily journal mode** | Jump straight into today’s entry. Daily notes are created under `Journal/YYYY/MM/YYYY-MM-DD.md`. |
+| **Todo blocks inside Markdown** | Todos stay inside notes instead of a separate database. States: `Open`, `Research`, `Doing`, `Done`. |
+| **Workspace todo overlay** | Collect, filter, edit, cycle, and delete todos across the workspace without leaving the writing flow. |
+
+### Workspace safety
+
+| Feature | What it does |
+| --- | --- |
+| **Multiple workspaces** | Create, register, and switch between local workspaces. |
+| **Wiki links and Markdown links** | Supports `[[Wiki Links]]` and standard Markdown links. Rename/move operations can update internal links. |
+| **Recovery and history** | Detects newer recovery data, warns about external file changes, and writes local history snapshots for safer file operations. |
+| **Image-friendly notes** | Renders Markdown images, supports dropped image files, and supports clipboard image paste on Windows. |
+| **Theme and editor presets** | Separate shell and Markdown appearance presets, with focused settings for writing ergonomics. |
+| **Portable packaging** | Includes a CMake target for producing a portable Windows zip. |
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 | Step | Action |
 | ---: | --- |
 | 1 | Launch Slate. |
-| 2 | Create a workspace or open an existing one. |
-| 3 | Start writing plain Markdown files in a normal folder. |
-| 4 | Use journal mode for daily notes. |
-| 5 | Use the todo overlay when you need to collect open work across the workspace. |
+| 2 | Create a workspace or open an existing folder. |
+| 3 | Start writing normal Markdown files. |
+| 4 | Press the journal shortcut to open today’s note. |
+| 5 | Use search, the file tree, and the todo overlay to move around your workspace. |
 
-### Home actions
+### Default home shortcuts
 
-| Key | Action |
+> Shortcuts are bindable from the settings/config screen. The table below shows the default intent.
+
+| Default | Action |
 | --- | --- |
 | `j` | open today’s journal |
 | `n` | create a new note |
@@ -141,34 +153,39 @@ The goal is to make opening a workspace and writing feel immediate, calm, and du
 | `t` | open todos |
 | `c` | open config |
 | `w` | switch workspaces |
-| `?` | help |
 | `q` | quit |
 
 ### Command mode
 
-Slate also supports a small command flow.
+Slate also supports a small command flow:
 
 | Command | Example |
 | --- | --- |
 | Today | `:today` |
-| Open | `:open Notes/Ideas.md` |
-| New note | `:new` |
-| New folder | `:mkdir` |
+| Open note | `:open Notes/Ideas.md` |
 | Todos | `:todos` |
 | Search | `:search renderer` |
 | Workspaces | `:workspaces` |
-| Write | `:w` |
-| Write and quit | `:wq` |
 
-### Journal flow
+---
 
-Press `j` to open or create today’s daily note.
+## 🪴 Workflows
+
+### Daily journal
+
+Press the journal shortcut to open or create today’s note.
 
 <div align="center">
-  <img src="https://github.com/mykaadev/Slate/blob/main/resources/journal.png" width="700" alt="Landing Page" />
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/journal.png" width="700" alt="Slate journal view" />
 </div>
 
-New daily entries start with:
+Daily notes are stored predictably:
+
+```text
+Journal/YYYY/MM/YYYY-MM-DD.md
+```
+
+New entries start simple:
 
 ```md
 # YYYY-MM-DD
@@ -176,17 +193,14 @@ New daily entries start with:
 - 
 ```
 
-Slate also builds a month summary for journaling and includes a rotating reflection prompt for the active day.
+Slate also builds a month summary and includes a rotating reflection prompt for the active day.
 
-### Todo flow
+### Todo blocks
 
-Slate treats todos as part of your Markdown workflow.  
-A todo block looks like this:
-
-Easily created by using `/todo`
+Slate treats todos as part of your Markdown workflow. Create one from the editor with `/todo`.
 
 <div align="center">
-  <img src="https://github.com/mykaadev/Slate/blob/main/resources/todos.png" width="700" alt="Landing Page" />
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/todos.png" width="700" alt="Slate todo overlay" />
 </div>
 
 ```md
@@ -195,104 +209,122 @@ Easily created by using `/todo`
   add screenshot
 ```
 
-| Todo states |
+| Todo state flow |
 | --- |
 | `Open -> Research -> Doing -> Done` |
 
-You can collect, filter, and edit todo blocks from across the workspace without leaving the writing flow.
+Use the todo overlay to collect, search, edit, cycle, or delete todo blocks from across the workspace.
+
+### File tree and search
+
+Slate is built around folder-based workspaces, so the tree and search flow are central:
+
+| Flow | Use it for |
+| --- | --- |
+| **File tree** | moving through nested folders, opening notes, managing workspace structure |
+| **Library view** | browsing non-journal notes without daily entries getting in the way |
+| **Search overlay** | jumping to files, matching note text, and reopening recent documents |
 
 ---
 
 ## 🧩 Configuration
 
-Slate keeps configuration intentionally small and workspace-friendly.
-
-### 1) Workspace model
-
-A workspace is just a normal folder containing your Markdown files plus a `.slate/` directory for local app data.
-
-| Typical contents |
-| --- |
-| `Journal/` |
-| `Notes/` |
-| `Projects/` |
-| `.slate/` |
-
-### 2) Workspace settings
-
-Slate stores per-workspace settings in plain files:
-
-```text
-.slate/editor.tsv
-.slate/theme.tsv
-```
+Slate keeps configuration plain, small, and separated by responsibility.
 
 <div align="center">
-  <img src="https://github.com/mykaadev/Slate/blob/main/resources/settings.png" width="700" alt="Landing Page" />
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/settings.png" width="700" alt="Slate settings view" />
 </div>
 
-These cover things like:
+### App config
 
-| Editor | Layout | Writing flow |
-| --- | --- | --- |
-| font size | page width | preview sync behavior |
-| line spacing | panel layout | caret feel |
-| word wrap | panel and scroll motion | link underline |
-| whitespace visibility | tab width | smart list continuation |
-| current-line highlight |  | clipboard image paste |
+User-level app config is stored under:
 
-### 3) Theme presets
+```text
+%APPDATA%/Slate/config/
+```
+
+Current config layout:
+
+```text
+%APPDATA%/Slate/config/workspace/settings.tsv
+%APPDATA%/Slate/config/input/shortcuts.tsv
+%APPDATA%/Slate/config/appearance/theme.tsv
+%APPDATA%/Slate/config/editor/editor.tsv
+```
+
+Older flat files, such as `%APPDATA%/Slate/shortcuts.tsv`, may still be read as fallback migration paths, but new saves go into the categorized config folders.
+
+### Workspace model
+
+A workspace is just a normal folder containing Markdown files. Slate may also create local workspace data for history, recovery, and workspace-owned presets.
+
+```text
+MyWorkspace/
+  Journal/
+  Notes/
+  Projects/
+  .slate/
+```
+
+### Shortcut bindings
+
+All visible helper text should come from the active shortcut bindings, not hardcoded key strings.
+
+| Action | Behavior |
+| --- | --- |
+| Open settings | go to the shortcuts section |
+| Select shortcut row | press `Enter` |
+| Bind shortcut | press the new key chord in the capture popup |
+| Cancel capture | press `Esc` |
+
+Default shortcut declarations live in:
+
+```text
+src/App/Slate/Input/ShortcutService.cpp
+```
+
+Look for:
+
+```cpp
+ShortcutService::RegisterDefaults()
+```
+
+### Theme presets
 
 Slate separates the app shell theme from Markdown rendering colors.
 
-| Preset type | Built-in presets | Workspace-specific preset overrides |
+| Preset type | Built-in presets | Workspace-specific overrides |
 | --- | --- | --- |
 | Shell | `assets/slate/presets/shell/` | `.slate/presets/shell/` |
 | Markdown | `assets/slate/presets/markdown/` | `.slate/presets/markdown/` |
 
-### 4) Workspace registry
-
-Your saved workspace list is stored separately from note content, so you can keep multiple local workspaces and switch between them easily.
-
-### 5) File ownership
-
-Slate is built around normal files and folders.  
-That means your backup and sync strategy stays your choice:
-
-| Backup and sync options |
-| --- |
-| Syncthing |
-| cloud-synced folders |
-| Git |
-| manual backup |
-| whatever works for you |
-
 ---
 
-## 🧠 How it works
+## 🧠 How It Works
 
 | Area | Details |
 | --- | --- |
-| **Workspace scanning** | Slate opens a folder, indexes Markdown files, and keeps a workspace tree for navigation, search, and recent-file history. |
-| **Search modes** | Search can target document names, full note text, and recent files.<br>That keeps quick lookup lightweight without turning the app into a database-first system. |
-| **Journal structure** | Today’s journal note is resolved automatically from the current local date and placed into a predictable folder layout. |
-| **Markdown model** | Slate parses headings, Markdown links, wiki links, tags, and todo tickets.<br>That powers the preview, outline, search snippets, link rewriting, and todo overlays. |
-| **Rename and move safety** | When a note is renamed or moved, Slate can build a rewrite plan and update matching internal Markdown and wiki links across the workspace. |
-| **Recovery and history** | Slate keeps local recovery files and history snapshots under `.slate/`.<br>If a newer recovery copy exists, the app can offer to restore it. |
-| **External file awareness** | If a file changes outside Slate, the editor can detect that state and warn instead of silently pretending everything is fine. |
+| **Workspace scanning** | Slate opens a folder, indexes Markdown files, and builds a tree for navigation, search, and recent-file history. |
+| **Search modes** | Search can target document names, full note text, and recent files. |
+| **Journal structure** | Today’s journal note is resolved from the current local date and written to a predictable folder layout. |
+| **Markdown model** | Slate parses headings, Markdown links, wiki links, tags, and todo tickets. That powers preview, outline, search snippets, link rewriting, and todo overlays. |
+| **Rename and move safety** | When a note is renamed or moved, Slate can build a rewrite plan and update matching internal Markdown/wiki links across the workspace. |
+| **Recovery and history** | Slate keeps local recovery files and history snapshots under `.slate/`. If a newer recovery copy exists, the app can offer to restore it. |
+| **External file awareness** | If a file changes outside Slate, the editor can detect that state and warn instead of silently overwriting work. |
+| **Modular app structure** | Runtime behavior is moving toward modules, services, commands, and overlays so each feature owns its own responsibilities. |
 
 ---
 
-## 📚 Best practices
+## 📚 Best Practices
 
 | Practice | Why |
 | --- | --- |
-| Keep one workspace per real context. | Example: personal notes, studio notes, project notes. |
-| Let journals stay in `Journal/`. | Keeping daily notes predictable makes backup, browsing, and future sync much easier. |
-| Use links aggressively. | `[[Wiki Links]]` and Markdown links both help turn plain files into a usable knowledge graph without extra ceremony. |
-| Keep todos close to the note they belong to. | Slate works best when tasks stay attached to context instead of drifting into a disconnected task silo. |
-| Treat themes as writing ergonomics, not decoration. | A calm shell preset plus a readable Markdown preset changes the whole feel of the app. |
-| Sync the workspace folder, not the app. | Slate is happiest when sync stays file-based. |
+| Keep one workspace per real context. | Example: personal notes, studio notes, or project notes. |
+| Let journals stay in `Journal/`. | Predictable daily notes make search, sync, and backup easier. |
+| Use links aggressively. | `[[Wiki Links]]` and Markdown links turn plain files into a useful knowledge graph. |
+| Keep todos close to context. | Slate works best when tasks stay attached to the notes that explain them. |
+| Treat themes as writing ergonomics. | A calm shell preset plus a readable Markdown preset changes the whole feel of the app. |
+| Sync the workspace folder, not the app. | Use Syncthing, Git, cloud folders, or manual backups. Your files stay yours. |
 
 ---
 
@@ -300,14 +332,14 @@ That means your backup and sync strategy stays your choice:
 
 | Requirement | Notes |
 | --- | --- |
-| **CMake 3.15+** | First configure/build will fetch third-party dependencies such as GLFW, ImGui, and nlohmann/json. |
-| **C++17 compiler** |  |
-| **OpenGL-capable desktop environment** |  |
-| **Windows is the primary target right now** | Windows builds also pull Scintilla and Lexilla sources during configure. |
+| **CMake 3.15+** | First configure/build fetches third-party dependencies such as GLFW, ImGui, and nlohmann/json. |
+| **C++17 compiler** | Required for the core application code. |
+| **OpenGL-capable desktop environment** | Needed by the current desktop renderer. |
+| **Windows primary target** | Windows builds also pull Scintilla and Lexilla sources during configure. |
 
 ---
 
-## 🛠️ Installation
+## 🛠️ Building
 
 ### Build from source
 
@@ -316,8 +348,7 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-On single-config generators, the executable is produced under `build/bin/`.  
-On Visual Studio-style generators, use your selected configuration.
+On single-config generators, the executable is produced under `build/bin/`. On Visual Studio-style generators, use your selected configuration.
 
 ### Run tests
 
@@ -351,9 +382,10 @@ assets/
   app/
   slate/
     presets/
+resources/
 src/
   App/
-  Features/
+    Slate/
   Framework/
   Modes/
 tests/
@@ -368,7 +400,7 @@ cmake/
 <a href="https://github.com/mykaadev/Slate/graphs/contributors"><img src="https://contrib.rocks/image?repo=mykaadev/Slate"/></a>
 <br>
 
-| GLFW |  Dear ImGui | nlohmann/json | Scintilla | Lexilla |
+| GLFW | Dear ImGui | nlohmann/json | Scintilla | Lexilla |
 | --- | --- | --- | --- | --- |
 
 ## 📞 Support
