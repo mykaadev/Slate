@@ -180,15 +180,22 @@ namespace Software::Slate
         return m_listOpen || m_form.open;
     }
 
-    std::string SlateTodoOverlayController::HelperText() const
+    std::string SlateTodoOverlayController::HelperText(const ShortcutService& shortcuts) const
     {
         if (m_form.open)
         {
-            return "(tab) state   (enter) save   (esc) cancel";
+            return shortcuts.Helper(ShortcutAction::TodoState, "state") + "   " +
+                   shortcuts.Helper(ShortcutAction::Accept, "save") + "   " +
+                   shortcuts.Helper(ShortcutAction::Cancel, "cancel");
         }
         if (m_listOpen)
         {
-            return "(tab) filter   (/) search   (enter) edit   (o) open   (del/x) delete   (esc) close";
+            return shortcuts.Helper(ShortcutAction::TodoState, "filter") + "   " +
+                   shortcuts.Helper(ShortcutAction::BrowserFilter, "search") + "   " +
+                   shortcuts.Helper(ShortcutAction::Accept, "edit") + "   " +
+                   shortcuts.Helper(ShortcutAction::TodoOpen, "focus") + "   " +
+                   shortcuts.Helper(ShortcutAction::TodoDelete, "delete") + "   " +
+                   shortcuts.Helper(ShortcutAction::Cancel, "close");
         }
         return {};
     }
@@ -232,7 +239,8 @@ namespace Software::Slate
                                               const TodoOverlayCallbacks& callbacks)
     {
         auto* workspace = WorkspaceContext(context);
-        const bool allowInput = !m_form.open;
+        const auto* shortcuts = workspace ? &workspace->Shortcuts() : nullptr;
+        const bool allowInput = !m_form.open && shortcuts;
         if (!workspace)
         {
             m_visibleTodos.clear();
@@ -255,24 +263,24 @@ namespace Software::Slate
                              m_visibleTodos.end());
         m_navigation.SetCount(m_visibleTodos.size());
 
-        if (allowInput && IsKeyPressed(ImGuiKey_Tab))
+        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoState))
         {
             m_stateFilter = (m_stateFilter + 1) % 5;
             m_navigation.Reset();
         }
-        if (allowInput && !ImGui::GetIO().KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        if (allowInput && shortcuts->Pressed(ShortcutAction::BrowserFilter))
         {
             m_focusSearch = true;
         }
-        if (allowInput && ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        if (allowInput && shortcuts->Pressed(ShortcutAction::NavigateDown, true))
         {
             m_navigation.MoveNext();
         }
-        if (allowInput && ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (allowInput && shortcuts->Pressed(ShortcutAction::NavigateUp, true))
         {
             m_navigation.MovePrevious();
         }
-        if (allowInput && IsKeyPressed(ImGuiKey_Escape))
+        if (allowInput && shortcuts->Pressed(ShortcutAction::Cancel))
         {
             m_listOpen = false;
             if (callbacks.restoreEditorFocus)
@@ -281,19 +289,19 @@ namespace Software::Slate
             }
             return;
         }
-        if (allowInput && (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+        if (allowInput && shortcuts->Pressed(ShortcutAction::Accept) &&
             m_navigation.HasSelection() && !m_visibleTodos.empty())
         {
             BeginEdit(m_visibleTodos[m_navigation.Selected()]);
             return;
         }
-        if (allowInput && (IsKeyPressed(ImGuiKey_Delete) || IsKeyPressed(ImGuiKey_X)) &&
+        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoDelete) &&
             m_navigation.HasSelection() && !m_visibleTodos.empty())
         {
             DeleteSelected(context, callbacks);
             return;
         }
-        if (allowInput && IsKeyPressed(ImGuiKey_O) && m_navigation.HasSelection() && !m_visibleTodos.empty())
+        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoOpen) && m_navigation.HasSelection() && !m_visibleTodos.empty())
         {
             const auto todo = m_visibleTodos[m_navigation.Selected()];
             m_listOpen = false;
@@ -386,6 +394,13 @@ namespace Software::Slate
     void SlateTodoOverlayController::DrawForm(Software::Core::Runtime::AppContext& context,
                                               const TodoOverlayCallbacks& callbacks)
     {
+        auto* workspace = WorkspaceContext(context);
+        const auto* shortcuts = workspace ? &workspace->Shortcuts() : nullptr;
+        if (!shortcuts)
+        {
+            return;
+        }
+
         const ImVec2 size(std::min(620.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.52f)),
                           std::min(220.0f, std::max(176.0f, ImGui::GetWindowHeight() * 0.24f)));
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
@@ -450,7 +465,7 @@ namespace Software::Slate
         const bool textInputActive = titleActive || descriptionActive || titleFocused || descriptionFocused;
         ImGui::PopItemFlag();
         ImGui::Separator();
-        DrawShortcutText("(tab) state   (enter) save   (esc) cancel", Amber, Primary);
+        DrawShortcutText(HelperText(*shortcuts), Amber, Primary);
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
@@ -460,11 +475,11 @@ namespace Software::Slate
             m_form.requestTextFocus = true;
         }
 
-        if (IsKeyPressed(ImGuiKey_Tab))
+        if (shortcuts->Pressed(ShortcutAction::TodoState))
         {
             m_form.state = MarkdownService::NextTodoState(m_form.state);
         }
-        if (IsKeyPressed(ImGuiKey_Escape))
+        if (shortcuts->Pressed(ShortcutAction::Cancel))
         {
             CancelForm(context, callbacks);
             return;

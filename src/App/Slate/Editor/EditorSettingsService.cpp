@@ -1,6 +1,7 @@
 #include "App/Slate/Editor/EditorSettingsService.h"
 
 #include "App/Slate/Core/SettingsFile.h"
+#include "App/Slate/Core/AppPaths.h"
 
 #include <algorithm>
 #include <fstream>
@@ -19,7 +20,7 @@ namespace Software::Slate
 
     fs::path EditorSettingsService::SettingsPath() const
     {
-        return m_workspaceRoot.empty() ? fs::path() : (m_workspaceRoot / ".slate" / "editor.tsv");
+        return AppPaths::ConfigFile("editor", "editor.tsv");
     }
 
     bool EditorSettingsService::Load(EditorSettings* out, std::string* error) const
@@ -29,6 +30,14 @@ namespace Software::Slate
         if (!settingsPath.empty())
         {
             std::ifstream file(settingsPath, std::ios::binary);
+            if (!file)
+            {
+                file.open(AppPaths::LegacyConfigFile("editor.tsv"), std::ios::binary);
+            }
+            if (!file && !m_workspaceRoot.empty())
+            {
+                file.open(m_workspaceRoot / ".slate" / "editor.tsv", std::ios::binary);
+            }
             if (file)
             {
                 std::string line;

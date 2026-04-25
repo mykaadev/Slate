@@ -48,16 +48,17 @@ namespace Software::Slate
             return Cyan;
         }
 
-        const char* WorkspaceSearchModeHint(SearchMode mode)
+        std::string WorkspaceSearchModeHint(SearchMode mode, const ShortcutService& shortcuts)
         {
+            const std::string cycle = shortcuts.Label(ShortcutAction::SearchMode) + " cycles docs / text / recent";
             switch (mode)
             {
             case SearchMode::FileNames:
-                return "type to search docs. Tab cycles docs / text / recent";
+                return "type to search docs. " + cycle;
             case SearchMode::FullText:
-                return "type to search note text. Tab cycles docs / text / recent";
+                return "type to search note text. " + cycle;
             case SearchMode::Recent:
-                return "recent files. Type to filter. Tab cycles docs / text / recent";
+                return "recent files. Type to filter. " + cycle;
             }
             return "type to search";
         }
@@ -104,12 +105,9 @@ namespace Software::Slate
             return results;
         }
 
-        std::string NextSearchModeHelper(SearchMode mode)
+        std::string NextSearchModeHelper(SearchMode mode, const ShortcutService& shortcuts)
         {
-            std::string helper = "(tab) ";
-            helper += WorkspaceSearchModeLabel(NextWorkspaceSearchMode(mode));
-            helper += "   (up/down) move   (enter) open   (esc) close";
-            return helper;
+            return shortcuts.Helper(ShortcutAction::SearchMode, WorkspaceSearchModeLabel(NextWorkspaceSearchMode(mode)));
         }
     }
 
@@ -174,13 +172,18 @@ namespace Software::Slate
         }
     }
 
-    std::string SlateSearchOverlayController::HelperText() const
+    std::string SlateSearchOverlayController::HelperText(const ShortcutService& shortcuts) const
     {
+        const std::string move = "(" + shortcuts.Label(ShortcutAction::NavigateUp) + "/" +
+                                 shortcuts.Label(ShortcutAction::NavigateDown) + ") move";
         if (m_scope == SearchOverlayScope::Document)
         {
-            return "(up/down) move   (enter) jump   (shift+enter) prev   (esc) close";
+            return move + "   " + shortcuts.Helper(ShortcutAction::Accept, "jump") + "   " +
+                   shortcuts.Helper(ShortcutAction::SearchPrevious, "prev") + "   " +
+                   shortcuts.Helper(ShortcutAction::Cancel, "close");
         }
-        return NextSearchModeHelper(m_mode);
+        return move + "   " + shortcuts.Helper(ShortcutAction::Accept, "open") + "   " +
+               shortcuts.Helper(ShortcutAction::Cancel, "close") + "   " + NextSearchModeHelper(m_mode, shortcuts);
     }
 
     void SlateSearchOverlayController::RefreshResults(Software::Core::Runtime::AppContext& context)
@@ -231,32 +234,40 @@ namespace Software::Slate
             return;
         }
 
+        auto workspace = context.services.Resolve<SlateWorkspaceContext>();
+        if (!workspace)
+        {
+            Close();
+            return;
+        }
+        const auto& shortcuts = workspace->Shortcuts();
+
         RefreshResults(context);
 
-        if (m_scope == SearchOverlayScope::Workspace && IsKeyPressed(ImGuiKey_Tab))
+        if (m_scope == SearchOverlayScope::Workspace && shortcuts.Pressed(ShortcutAction::SearchMode))
         {
             m_mode = NextWorkspaceSearchMode(m_mode);
             m_navigation.Reset();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        if (shortcuts.Pressed(ShortcutAction::NavigateDown, true))
         {
             m_navigation.MoveNext();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (shortcuts.Pressed(ShortcutAction::NavigateUp, true))
         {
             m_navigation.MovePrevious();
         }
-        if ((IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+        if ((shortcuts.Pressed(ShortcutAction::Accept) || shortcuts.Pressed(ShortcutAction::SearchPrevious)) &&
             m_navigation.HasSelection() && !m_results.empty())
         {
-            if (m_scope == SearchOverlayScope::Document && ImGui::GetIO().KeyShift)
+            if (m_scope == SearchOverlayScope::Document && shortcuts.Pressed(ShortcutAction::SearchPrevious))
             {
                 m_navigation.MovePrevious();
             }
             ActivateSelected(callbacks);
             return;
         }
-        if (IsKeyPressed(ImGuiKey_Escape))
+        if (shortcuts.Pressed(ShortcutAction::Cancel))
         {
             Close();
             return;
@@ -293,8 +304,9 @@ namespace Software::Slate
         const bool showQueryHint = m_query.empty() && (documentFind || m_mode != SearchMode::Recent);
         if (showQueryHint)
         {
-            ImGui::TextColored(Muted, "%s", documentFind ? "type to find in this file"
-                                                         : WorkspaceSearchModeHint(m_mode));
+            const std::string hint = documentFind ? std::string("type to find in this file")
+                                                    : WorkspaceSearchModeHint(m_mode, shortcuts);
+            ImGui::TextColored(Muted, "%s", hint.c_str());
         }
         else if (m_results.empty())
         {

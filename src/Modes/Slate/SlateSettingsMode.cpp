@@ -1,6 +1,7 @@
 #include "Modes/Slate/SlateSettingsMode.h"
 
 #include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Core/AppPaths.h"
 #include "App/Slate/Core/SlateModeIds.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
@@ -211,8 +212,15 @@ namespace Software::Modes::Slate
         void DrawSettingRow(bool selected, const char* label, std::string_view value)
         {
             const std::string text(value);
-            ImGui::TextColored(selected ? Green : Primary, "%s %-18s %s",
+            ImGui::TextColored(selected ? Green : Primary, "%s %-22s %s",
                                selected ? ">" : " ", label, text.c_str());
+        }
+
+        std::string PairLabel(const Software::Slate::ShortcutService& shortcuts,
+                              Software::Slate::ShortcutAction first,
+                              Software::Slate::ShortcutAction second)
+        {
+            return shortcuts.Label(first) + "/" + shortcuts.Label(second);
         }
     }
 
@@ -224,6 +232,7 @@ namespace Software::Modes::Slate
     void SlateSettingsMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
     {
         auto& workspace = WorkspaceContext(context);
+        auto& shortcuts = workspace.Shortcuts();
         auto& ui = UiState(context);
         if (!workspace.HasWorkspaceLoaded())
         {
@@ -255,28 +264,49 @@ namespace Software::Modes::Slate
             }
         };
 
-        if (handleInput)
+        const std::size_t settingsRowCount = static_cast<std::size_t>(SettingsRow::Count);
+        const std::size_t shortcutRowOffset = settingsRowCount;
+        const auto& shortcutDefinitions = shortcuts.Definitions();
+        const std::size_t totalRows = settingsRowCount + shortcutDefinitions.size();
+
+        if (handleInput && !m_shortcutCaptureOpen)
         {
-            ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
-            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+            ui.navigation.SetCount(totalRows);
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
             {
                 ui.navigation.MoveNext();
             }
-            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
             {
                 ui.navigation.MovePrevious();
             }
 
-            const int delta = (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) ? -1 :
-                               (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) ||
-                                IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
-                                   ? 1
-                                   : 0);
+            const std::size_t selectedRow = ui.navigation.Selected();
+            if (selectedRow >= shortcutRowOffset)
+            {
+                const std::size_t shortcutIndex = selectedRow - shortcutRowOffset;
+                if (shortcutIndex < shortcutDefinitions.size() && shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
+                {
+                    m_shortcutCaptureOpen = true;
+                    m_shortcutCaptureArmed = false;
+                    m_shortcutCaptureAction = shortcutDefinitions[shortcutIndex].action;
+                    m_shortcutCaptureLabel = std::string(shortcutDefinitions[shortcutIndex].group) + ": " +
+                                             shortcutDefinitions[shortcutIndex].label;
+                }
+            }
+
+            const int delta = selectedRow < shortcutRowOffset
+                                  ? (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateLeft, true) ? -1 :
+                                     (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateRight, true) ||
+                                      shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
+                                         ? 1
+                                         : 0)
+                                  : 0;
             if (delta != 0)
             {
                 auto themeSettings = workspace.CurrentThemeSettings();
                 auto editorSettings = workspace.CurrentEditorSettings();
-                const auto row = static_cast<SettingsRow>(ui.navigation.Selected());
+                const auto row = static_cast<SettingsRow>(selectedRow);
 
                 switch (row)
                 {
@@ -381,19 +411,27 @@ namespace Software::Modes::Slate
                     break;
                 case SettingsRow::Count:
                     break;
-                }
+                    }
             }
 
-            if (IsKeyPressed(ImGuiKey_R))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::SettingsReset))
             {
                 workspace.SetThemeSettings(Software::Slate::ThemeService::DefaultSettings());
                 workspace.SetEditorSettings(Software::Slate::EditorSettingsService::DefaultSettings());
                 saveAppearance();
                 saveEditor();
-                SetStatus("settings reset");
+                std::string error;
+                if (!shortcuts.Reset(&error))
+                {
+                    SetError(error);
+                }
+                else
+                {
+                    SetStatus("settings and shortcuts reset");
+                }
             }
 
-            if (IsKeyPressed(ImGuiKey_Escape))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
             {
                 ShowHome(context);
                 return;
@@ -402,7 +440,7 @@ namespace Software::Modes::Slate
 
         const auto themeSettings = workspace.CurrentThemeSettings();
         const auto editorSettings = workspace.CurrentEditorSettings();
-        ui.navigation.SetCount(static_cast<std::size_t>(SettingsRow::Count));
+        ui.navigation.SetCount(totalRows);
 
         const float contentHeight = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
         const float layoutWidth = CenteredColumnWidth(1180.0f);
@@ -465,10 +503,25 @@ namespace Software::Modes::Slate
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PasteClipboardImages),
                        "paste images", OnOffLabel(editorSettings.pasteClipboardImages));
 
+        ImGui::Dummy(ImVec2(1.0f, 12.0f));
+        ImGui::TextColored(Muted, "shortcuts");
+        ImGui::TextColored(Muted, "select a shortcut and press %s to rebind; overrides save to %s",
+                           shortcuts.Label(Software::Slate::ShortcutAction::Accept).c_str(),
+                           shortcuts.SettingsPath().generic_string().c_str());
+        ImGui::TextColored(Muted, "default bindings live in %s", Software::Slate::ShortcutService::DefaultsSourcePath());
+        for (std::size_t i = 0; i < shortcutDefinitions.size(); ++i)
+        {
+            const auto& definition = shortcutDefinitions[i];
+            const bool selected = ui.navigation.Selected() == shortcutRowOffset + i;
+            const std::string label = std::string(definition.group) + ": " + definition.label;
+            DrawSettingRow(selected, label.c_str(), shortcuts.Label(definition.action));
+        }
+
         ImGui::Dummy(ImVec2(1.0f, 14.0f));
         ImGui::Separator();
         ImGui::Dummy(ImVec2(1.0f, 8.0f));
-        ImGui::TextColored(Muted, "Editor settings save to .slate/editor.tsv. Appearance choices save to .slate/theme.tsv.");
+        ImGui::TextColored(Muted, "config root: %s", Software::Slate::AppPaths::ConfigDirectory().generic_string().c_str());
+        ImGui::TextColored(Muted, "workspace/settings.tsv, input/shortcuts.tsv, appearance/theme.tsv, editor/editor.tsv");
         ImGui::EndChild();
 
         ImGui::SameLine(0.0f, gap);
@@ -499,11 +552,79 @@ namespace Software::Modes::Slate
         ImGui::SetWindowFontScale(1.0f);
         ImGui::EndChild();
         ImGui::EndGroup();
+
+        if (m_shortcutCaptureOpen)
+        {
+            ImGui::OpenPopup("Bind shortcut");
+        }
+
+        if (ImGui::BeginPopupModal("Bind shortcut", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+        {
+            ImGui::TextColored(Cyan, "bind shortcut");
+            ImGui::Separator();
+            ImGui::TextColored(Primary, "%s", m_shortcutCaptureLabel.c_str());
+            ImGui::Dummy(ImVec2(1.0f, 8.0f));
+            ImGui::TextColored(Muted, "current: %s", shortcuts.Label(m_shortcutCaptureAction).c_str());
+            ImGui::TextColored(Muted, "press the new shortcut now");
+            ImGui::TextColored(Muted, "esc cancels");
+            ImGui::Dummy(ImVec2(1.0f, 8.0f));
+
+            if (!m_shortcutCaptureArmed)
+            {
+                m_shortcutCaptureArmed = true;
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            {
+                m_shortcutCaptureOpen = false;
+                m_shortcutCaptureArmed = false;
+                m_shortcutCaptureAction = Software::Slate::ShortcutAction::Count;
+                m_shortcutCaptureLabel.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            else
+            {
+                Software::Slate::KeyBinding captured;
+                if (Software::Slate::ShortcutService::CapturePressedBinding(&captured))
+                {
+                    std::string error;
+                    if (shortcuts.SetBinding(m_shortcutCaptureAction, captured, &error))
+                    {
+                        SetStatus("shortcut updated: " + Software::Slate::ShortcutService::SerializeBinding(captured));
+                    }
+                    else
+                    {
+                        SetError(error);
+                    }
+                    m_shortcutCaptureOpen = false;
+                    m_shortcutCaptureArmed = false;
+                    m_shortcutCaptureAction = Software::Slate::ShortcutAction::Count;
+                    m_shortcutCaptureLabel.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+
+            if (ImGui::Button("cancel"))
+            {
+                m_shortcutCaptureOpen = false;
+                m_shortcutCaptureArmed = false;
+                m_shortcutCaptureAction = Software::Slate::ShortcutAction::Count;
+                m_shortcutCaptureLabel.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
     }
 
     std::string SlateSettingsMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
-        (void)context;
-        return "(up/down) choose   (left/right) change   (r) reset all   (esc) home";
+        const auto& shortcuts = WorkspaceContext(const_cast<Software::Core::Runtime::AppContext&>(context)).Shortcuts();
+        return "(" + PairLabel(shortcuts, Software::Slate::ShortcutAction::NavigateUp,
+                                Software::Slate::ShortcutAction::NavigateDown) + ") choose   (" +
+               PairLabel(shortcuts, Software::Slate::ShortcutAction::NavigateLeft,
+                         Software::Slate::ShortcutAction::NavigateRight) + ") change setting   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "rebind shortcut") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::SettingsReset, "reset all") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
     }
 }

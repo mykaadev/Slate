@@ -107,22 +107,40 @@ namespace Software::Modes::Slate
 
     std::string SlateBrowserMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
-        const auto& ui = UiState(const_cast<Software::Core::Runtime::AppContext&>(context));
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        const auto& ui = UiState(mutableContext);
+        const auto& shortcuts = WorkspaceContext(mutableContext).Shortcuts();
+        const std::string move = "(" + shortcuts.Label(Software::Slate::ShortcutAction::NavigateUp) + "/" +
+                                 shortcuts.Label(Software::Slate::ShortcutAction::NavigateDown) + ") move";
+        const std::string tree = "(" + shortcuts.Label(Software::Slate::ShortcutAction::NavigateLeft) + "/" +
+                                 shortcuts.Label(Software::Slate::ShortcutAction::NavigateRight) + ") tree nav";
         switch (ui.browserView)
         {
         case Software::Slate::SlateBrowserView::QuickOpen:
         case Software::Slate::SlateBrowserView::Recent:
-            return "(up/down) move   (enter) open   (/) search   (n) new   (esc) home";
+            return move + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "open") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::BrowserFilter, "search") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::HomeNewNote, "new") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
         case Software::Slate::SlateBrowserView::Library:
-            return "(up/down) move   (left/right) tree nav   (enter) open   (/) filter   (esc) home";
+            return move + "   " + tree + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "open") +
+                   "   " + shortcuts.Helper(Software::Slate::ShortcutAction::BrowserFilter, "filter") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
         case Software::Slate::SlateBrowserView::FileTree:
-            if (ui.folderPickerActive && ui.folderPickerAction == Software::Slate::FolderPickerAction::MoveDestination)
+            if (ui.folderPickerActive)
             {
-                return "(up/down) choose   (left/right) fold   (enter) select   (a) folder   (/) filter   (esc) cancel";
+                return move + "   " + tree + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "select") +
+                       "   " + shortcuts.Helper(Software::Slate::ShortcutAction::BrowserNewFolder, "folder") + "   " +
+                       shortcuts.Helper(Software::Slate::ShortcutAction::BrowserFilter, "filter") + "   " +
+                       shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "cancel");
             }
-            return ui.folderPickerActive
-                       ? "(up/down) choose   (left/right) fold   (enter) select   (a) folder   (/) filter   (esc) cancel"
-                       : "(up/down) move   (left/right) fold   (enter) open   (n) note   (a) folder   (m) move   (d) delete   (/) filter   (esc) home";
+            return move + "   " + tree + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "open") +
+                   "   " + shortcuts.Helper(Software::Slate::ShortcutAction::HomeNewNote, "note") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::BrowserNewFolder, "folder") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::BrowserMove, "move") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::BrowserDelete, "delete") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::BrowserFilter, "filter") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
         }
         return {};
     }
@@ -138,7 +156,7 @@ namespace Software::Modes::Slate
             const float rowWidth = std::min(620.0f, ImGui::GetContentRegionAvail().x);
             SetCursorCenteredForWidth(rowWidth);
             ImGui::BeginGroup();
-            ImGui::TextColored(Amber, "(/)");
+            ImGui::TextColored(Amber, "(%s)", WorkspaceContext(context).Shortcuts().Label(Software::Slate::ShortcutAction::BrowserFilter).c_str());
             ImGui::SameLine();
             ImGui::TextColored(Primary, "filter");
             ImGui::SameLine();
@@ -491,27 +509,29 @@ namespace Software::Modes::Slate
 
     void SlateBrowserMode::HandleListKeys(Software::Core::Runtime::AppContext& context)
     {
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        auto& ui = UiState(context);
+        auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
         {
-            UiState(context).navigation.MoveNext();
+            ui.navigation.MoveNext();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
         {
-            UiState(context).navigation.MovePrevious();
+            ui.navigation.MovePrevious();
         }
-        if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
         {
             OpenSelectedPath(context);
         }
-        if (IsKeyPressed(ImGuiKey_Slash))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
         {
             BeginSearchOverlay(true, context);
         }
-        if (IsKeyPressed(ImGuiKey_Escape))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
         {
             ShowHome(context);
         }
-        if (IsKeyPressed(ImGuiKey_N))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeNewNote))
         {
             BeginNewNoteFlow(context);
         }
@@ -520,8 +540,8 @@ namespace Software::Modes::Slate
     void SlateBrowserMode::HandleTreeKeys(Software::Core::Runtime::AppContext& context, bool folderPicker)
     {
         auto& ui = UiState(context);
-        const ImGuiIO& io = ImGui::GetIO();
-        if (!io.KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
         {
             ui.filterActive = true;
             ui.focusFilter = true;
@@ -529,13 +549,13 @@ namespace Software::Modes::Slate
 
         if (ui.filterActive)
         {
-            if (IsKeyPressed(ImGuiKey_Escape))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
             {
                 ui.filterActive = false;
                 return;
             }
         }
-        else if (IsKeyPressed(ImGuiKey_Escape))
+        else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
         {
             const bool wasMovePicker = ui.folderPickerAction == Software::Slate::FolderPickerAction::MoveDestination;
             ui.folderPickerActive = false;
@@ -551,11 +571,11 @@ namespace Software::Modes::Slate
             return;
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
         {
             ui.navigation.MoveNext();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
         {
             ui.navigation.MovePrevious();
         }
@@ -604,7 +624,7 @@ namespace Software::Modes::Slate
             return ui.treeRows.size();
         };
 
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateRight, true))
         {
             if (isCollapsedSelection())
             {
@@ -615,7 +635,7 @@ namespace Software::Modes::Slate
                 ui.navigation.SetSelected(ui.navigation.Selected() + 1);
             }
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateLeft, true))
         {
             if (!isCollapsedSelection() && hasVisibleChild())
             {
@@ -630,7 +650,7 @@ namespace Software::Modes::Slate
                 }
             }
         }
-        if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
         {
             ActivateSelectedTreeRow(context);
         }
@@ -640,20 +660,20 @@ namespace Software::Modes::Slate
             return;
         }
 
-        if (IsKeyPressed(ImGuiKey_A))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserNewFolder))
         {
             BeginFolderCreateFlow(context);
         }
-        if (!folderPicker && IsKeyPressed(ImGuiKey_M) && ui.navigation.HasSelection() && !ui.treeRows.empty())
+        if (!folderPicker && shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserMove) && ui.navigation.HasSelection() && !ui.treeRows.empty())
         {
             BeginMovePicker(context, ui.treeRows[ui.navigation.Selected()].relativePath);
         }
-        if (!folderPicker && (IsKeyPressed(ImGuiKey_D) || IsKeyPressed(ImGuiKey_Delete)) && ui.navigation.HasSelection() &&
+        if (!folderPicker && shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserDelete) && ui.navigation.HasSelection() &&
             !ui.treeRows.empty())
         {
             BeginDelete(context, ui.treeRows[ui.navigation.Selected()].relativePath);
         }
-        if (!folderPicker && IsKeyPressed(ImGuiKey_N))
+        if (!folderPicker && shortcuts.Pressed(Software::Slate::ShortcutAction::HomeNewNote))
         {
             BeginNewNoteFlow(context);
         }
@@ -662,8 +682,8 @@ namespace Software::Modes::Slate
     void SlateBrowserMode::HandleLibraryKeys(Software::Core::Runtime::AppContext& context)
     {
         auto& ui = UiState(context);
-        const ImGuiIO& io = ImGui::GetIO();
-        if (!io.KeyShift && IsKeyPressed(ImGuiKey_Slash))
+        auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
         {
             ui.filterActive = true;
             ui.focusFilter = true;
@@ -671,23 +691,23 @@ namespace Software::Modes::Slate
 
         if (ui.filterActive)
         {
-            if (IsKeyPressed(ImGuiKey_Escape))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
             {
                 ui.filterActive = false;
                 return;
             }
         }
-        else if (IsKeyPressed(ImGuiKey_Escape))
+        else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
         {
             ShowHome(context);
             return;
         }
 
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
         {
             ui.navigation.MoveNext();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
         {
             ui.navigation.MovePrevious();
         }
@@ -736,7 +756,7 @@ namespace Software::Modes::Slate
             return ui.treeRows.size();
         };
 
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateRight, true))
         {
             if (isCollapsedSelection())
             {
@@ -747,7 +767,7 @@ namespace Software::Modes::Slate
                 ui.navigation.SetSelected(ui.navigation.Selected() + 1);
             }
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateLeft, true))
         {
             if (!isCollapsedSelection() && hasVisibleChild())
             {
@@ -762,7 +782,7 @@ namespace Software::Modes::Slate
                 }
             }
         }
-        if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
         {
             ActivateSelectedTreeRow(context);
         }

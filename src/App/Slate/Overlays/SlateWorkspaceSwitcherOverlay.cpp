@@ -56,9 +56,9 @@ namespace Software::Slate
         return m_open;
     }
 
-    std::string SlateWorkspaceSwitcherOverlay::HelperText() const
+    std::string SlateWorkspaceSwitcherOverlay::HelperText(const ShortcutService& shortcuts) const
     {
-        return "(up/down) choose   (enter) switch   (n) new   (d) remove   (esc) close";
+        return "(" + shortcuts.Label(ShortcutAction::NavigateUp) + "/" + shortcuts.Label(ShortcutAction::NavigateDown) + ") choose   " + shortcuts.Helper(ShortcutAction::Accept, "switch") + "   " + shortcuts.Helper(ShortcutAction::WorkspaceNew, "new") + "   " + shortcuts.Helper(ShortcutAction::WorkspaceRemove, "remove") + "   " + shortcuts.Helper(ShortcutAction::Cancel, "close");
     }
 
     void SlateWorkspaceSwitcherOverlay::Draw(Software::Core::Runtime::AppContext& context,
@@ -77,18 +77,19 @@ namespace Software::Slate
         }
 
         auto& registry = workspace->WorkspaceRegistry();
+        const auto& shortcuts = workspace->Shortcuts();
         const auto& vaults = registry.Vaults();
         m_navigation.SetCount(vaults.size());
 
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+        if (shortcuts.Pressed(ShortcutAction::NavigateDown, true))
         {
             m_navigation.MoveNext();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+        if (shortcuts.Pressed(ShortcutAction::NavigateUp, true))
         {
             m_navigation.MovePrevious();
         }
-        if ((IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+        if ((shortcuts.Pressed(ShortcutAction::Accept)) &&
             m_navigation.HasSelection() && !vaults.empty())
         {
             const auto selectedVault = vaults[m_navigation.Selected()];
@@ -99,7 +100,7 @@ namespace Software::Slate
             }
             return;
         }
-        if (IsKeyPressed(ImGuiKey_N))
+        if (shortcuts.Pressed(ShortcutAction::WorkspaceNew))
         {
             Close();
             if (callbacks.showSetup)
@@ -108,11 +109,11 @@ namespace Software::Slate
             }
             if (callbacks.setStatus)
             {
-                callbacks.setStatus("press n to create a workspace");
+                callbacks.setStatus("press " + shortcuts.Label(ShortcutAction::WorkspaceNew) + " to create a workspace");
             }
             return;
         }
-        if (IsKeyPressed(ImGuiKey_D) && m_navigation.HasSelection() && !vaults.empty())
+        if (shortcuts.Pressed(ShortcutAction::WorkspaceRemove) && m_navigation.HasSelection() && !vaults.empty())
         {
             const auto id = vaults[m_navigation.Selected()].id;
             if (registry.RemoveVault(id))
@@ -134,7 +135,7 @@ namespace Software::Slate
                 }
             }
         }
-        if (IsKeyPressed(ImGuiKey_Escape))
+        if (shortcuts.Pressed(ShortcutAction::Cancel))
         {
             Close();
             return;

@@ -2,6 +2,7 @@
 
 #include "App/Slate/Core/NavigationController.h"
 #include "App/Slate/Core/SlateTypes.h"
+#include "App/Slate/Input/ShortcutService.h"
 #include "App/Slate/Todos/TodoService.h"
 #include "Core/Runtime/AppContext.h"
 
@@ -51,7 +52,7 @@ namespace Software::Slate
         bool IsAnyOpen() const;
 
         /** Returns the helper text to show in the global status bar. */
-        std::string HelperText() const;
+        std::string HelperText(const ShortcutService& shortcuts) const;
 
         /** Returns whether a text line is the todo slash command. */
         static bool IsSlashCommand(std::string_view text);

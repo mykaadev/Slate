@@ -24,37 +24,38 @@ namespace Software::Modes::Slate
             return;
         }
 
+        auto& shortcuts = workspace.Shortcuts();
         if (handleInput)
         {
-            if (IsKeyPressed(ImGuiKey_J))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeJournal))
             {
                 OpenTodayJournal(context);
             }
-            else if (IsKeyPressed(ImGuiKey_N))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeNewNote))
             {
                 BeginNewNoteFlow(context);
             }
-            else if (IsKeyPressed(ImGuiKey_S))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeSearch))
             {
                 BeginSearchOverlay(true, context);
             }
-            else if (IsKeyPressed(ImGuiKey_F))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeFiles))
             {
                 ShowBrowser(Software::Slate::SlateBrowserView::FileTree, context);
             }
-            else if (IsKeyPressed(ImGuiKey_W))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeWorkspaces))
             {
                 ShowWorkspaceSwitcher(context);
             }
-            else if (IsKeyPressed(ImGuiKey_T))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeTodos))
             {
                 ShowTodos(context);
             }
-            else if (IsKeyPressed(ImGuiKey_C))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeSettings))
             {
                 ShowSettings(context);
             }
-            else if (IsKeyPressed(ImGuiKey_Q))
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Quit))
             {
                 BeginQuitConfirm();
             }
@@ -84,29 +85,29 @@ namespace Software::Modes::Slate
             ImGui::Dummy(ImVec2(1.0f, 8.0f));
             ImGui::TextColored(color, "%s", title);
         };
-        auto action = [](const char* key, const char* label, const ImVec4& color) {
-            ImGui::TextColored(color, "(%s)", key);
+        auto action = [&](Software::Slate::ShortcutAction shortcut, const char* label, const ImVec4& color) {
+            ImGui::TextColored(color, "(%s)", shortcuts.Label(shortcut).c_str());
             ImGui::SameLine();
             ImGui::TextColored(Primary, "%s", label);
         };
         const ImVec4 systemColor{0.66f, 0.66f, 0.60f, 1.0f};
 
         section("write", Green);
-        action("j", "journal", Green);
-        action("n", "new", Green);
-        action("t", "todos", Green);
+        action(Software::Slate::ShortcutAction::HomeJournal, "journal", Green);
+        action(Software::Slate::ShortcutAction::HomeNewNote, "new", Green);
+        action(Software::Slate::ShortcutAction::HomeTodos, "todos", Green);
 
         section("find", Cyan);
-        action("s", "search", Cyan);
+        action(Software::Slate::ShortcutAction::HomeSearch, "search", Cyan);
 
         section("browse", Amber);
-        action("f", "files", Amber);
+        action(Software::Slate::ShortcutAction::HomeFiles, "files", Amber);
 
         section("system", systemColor);
-        action("w", "workspaces", systemColor);
-        action("c", "config", systemColor);
-        action("?", "help", systemColor);
-        action("q", "quit", systemColor);
+        action(Software::Slate::ShortcutAction::HomeWorkspaces, "workspaces", systemColor);
+        action(Software::Slate::ShortcutAction::HomeSettings, "config", systemColor);
+        action(Software::Slate::ShortcutAction::ToggleHelp, "help", systemColor);
+        action(Software::Slate::ShortcutAction::Quit, "quit", systemColor);
 
         ImGui::EndGroup();
 
@@ -117,7 +118,14 @@ namespace Software::Modes::Slate
 
     std::string SlateHomeMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
-        (void)context;
-        return "(j) journal   (n) new   (s) search   (f) files   (t) todos   (c) config   (?) help";
+        const auto& shortcuts = WorkspaceContext(const_cast<Software::Core::Runtime::AppContext&>(context)).Shortcuts();
+        return shortcuts.Helper(Software::Slate::ShortcutAction::HomeJournal, "journal") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeNewNote, "new") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeSearch, "search") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeFiles, "files") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeTodos, "todos") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeSettings, "config") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeWorkspaces, "workspaces") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::ToggleHelp, "help");
     }
 }

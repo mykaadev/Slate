@@ -470,6 +470,7 @@ namespace Software::Modes::Slate
     void SlateEditorMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
     {
         auto& workspace = WorkspaceContext(context);
+        auto& shortcuts = workspace.Shortcuts();
         auto& editor = EditorContext(context);
         auto& ui = UiState(context);
         const auto& editorSettings = workspace.CurrentEditorSettings();
@@ -538,15 +539,15 @@ namespace Software::Modes::Slate
             {
                 ui.visibleHeadings = editor.ParseHeadings(workspace.Documents());
                 ui.navigation.SetCount(ui.visibleHeadings.size());
-                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
                 {
                     ui.navigation.MoveNext();
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
                 {
                     ui.navigation.MovePrevious();
                 }
-                if (IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
                 {
                     if (ui.navigation.HasSelection() && !ui.visibleHeadings.empty())
                     {
@@ -554,18 +555,18 @@ namespace Software::Modes::Slate
                     }
                     ui.editorView = Software::Slate::SlateEditorView::Document;
                 }
-                if (IsCtrlPressed(ImGuiKey_O) || IsKeyPressed(ImGuiKey_Escape))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline) || shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                 {
                     ui.editorView = Software::Slate::SlateEditorView::Document;
                 }
             }
             else if (ui.editorView == Software::Slate::SlateEditorView::Preview)
             {
-                if (IsCtrlPressed(ImGuiKey_P) || IsKeyPressed(ImGuiKey_Escape))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorPreview) || shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                 {
                     ui.editorView = Software::Slate::SlateEditorView::Document;
                 }
-                else if (IsCtrlPressed(ImGuiKey_O))
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline))
                 {
                     ui.navigation.Reset();
                     ui.editorView = Software::Slate::SlateEditorView::Outline;
@@ -612,15 +613,15 @@ namespace Software::Modes::Slate
                     NavigateDocumentHistory(context, 1);
                 }
 
-                if (IsCtrlPressed(ImGuiKey_F) && workspace.Documents().HasOpenDocument())
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorFind) && workspace.Documents().HasOpenDocument())
                 {
                     BeginSearchOverlay(true, context, SearchOverlayScope::Document);
                 }
-                else if (IsCtrlPressed(ImGuiKey_O))
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline))
                 {
                     toggleOutlinePanel();
                 }
-                else if (IsCtrlPressed(ImGuiKey_P))
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorPreview))
                 {
                     togglePreviewPanel();
                 }
@@ -631,18 +632,18 @@ namespace Software::Modes::Slate
                 }
                 else if (editor.IsTextFocused())
                 {
-                    if (IsKeyPressed(ImGuiKey_Escape))
+                    if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                     {
                         editor.SetTextFocused(false);
                     }
                 }
                 else
                 {
-                    if (!ImGui::GetIO().KeyShift && IsKeyPressed(ImGuiKey_Slash))
+                    if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
                     {
                         BeginSearchOverlay(true, context);
                     }
-                    else if (IsKeyPressed(ImGuiKey_Escape))
+                    else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                     {
                         ShowHome(context);
                         return;
@@ -667,16 +668,29 @@ namespace Software::Modes::Slate
 
     std::string SlateEditorMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
-        const auto& ui = UiState(const_cast<Software::Core::Runtime::AppContext&>(context));
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        const auto& ui = UiState(mutableContext);
+        const auto& shortcuts = WorkspaceContext(mutableContext).Shortcuts();
+        const std::string move = "(" + shortcuts.Label(Software::Slate::ShortcutAction::NavigateUp) + "/" +
+                                 shortcuts.Label(Software::Slate::ShortcutAction::NavigateDown) + ") move";
         if (ui.editorView == Software::Slate::SlateEditorView::Outline)
         {
-            return "(up/down) move   (enter) jump   (esc) editor";
+            return move + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "jump") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "editor");
         }
         if (ui.editorView == Software::Slate::SlateEditorView::Preview)
         {
-            return "(ctrl+p) edit   (ctrl+o) outline   (esc) editor";
+            return shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "edit") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::EditorOutline, "outline") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "editor");
         }
-        return "(ctrl+p) preview   (ctrl+o) outline   (ctrl+f) find   (t) todos   (c) config   (ctrl+s) save   (esc) home";
+        return shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "preview") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::EditorOutline, "outline") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::EditorFind, "find") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeTodos, "todos") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::HomeSettings, "config") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::EditorSave, "save") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
     }
 
     void SlateEditorMode::DrawEditor(Software::Core::Runtime::AppContext& context,
@@ -1203,7 +1217,9 @@ namespace Software::Modes::Slate
     {
         auto& editorContext = EditorContext(context);
         auto& editor = editorContext.Editor();
-        const auto& editorSettings = WorkspaceContext(context).CurrentEditorSettings();
+        auto& workspace = WorkspaceContext(context);
+        const auto& shortcuts = workspace.Shortcuts();
+        const auto& editorSettings = workspace.CurrentEditorSettings();
         editor.EnsureLoaded(document.text, document.lineEnding);
         const auto& lines = editor.Lines();
 
@@ -1303,7 +1319,7 @@ namespace Software::Modes::Slate
                     break;
                 }
 
-                if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) && editor.ActiveLine() > 0)
+                if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true) && editor.ActiveLine() > 0)
                 {
                     editor.MoveActiveLine(-1);
                     ImGui::EndGroup();
@@ -1311,7 +1327,7 @@ namespace Software::Modes::Slate
                     break;
                 }
 
-                if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) &&
+                if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true) &&
                     editor.ActiveLine() + 1 < lines.size())
                 {
                     editor.MoveActiveLine(1);

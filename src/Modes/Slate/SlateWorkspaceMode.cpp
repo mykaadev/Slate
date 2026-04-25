@@ -21,17 +21,18 @@ namespace Software::Modes::Slate
     void SlateWorkspaceMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
     {
         auto& workspace = WorkspaceContext(context);
+        auto& shortcuts = workspace.Shortcuts();
         auto& ui = UiState(context);
 
         if (handleInput)
         {
             if (ui.workspaceView == Software::Slate::SlateWorkspaceView::Setup)
             {
-                if (IsKeyPressed(ImGuiKey_N))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::WorkspaceNew))
                 {
                     BeginWorkspaceCreate(context);
                 }
-                else if (IsKeyPressed(ImGuiKey_Q))
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Quit))
                 {
                     BeginQuitConfirm();
                 }
@@ -40,24 +41,24 @@ namespace Software::Modes::Slate
             {
                 const auto& vaults = workspace.WorkspaceRegistry().Vaults();
                 ui.workspaceNavigation.SetCount(vaults.size());
-                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
                 {
                     ui.workspaceNavigation.MoveNext();
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
                 {
                     ui.workspaceNavigation.MovePrevious();
                 }
-                if ((IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter)) &&
+                if ((shortcuts.Pressed(Software::Slate::ShortcutAction::Accept)) &&
                     ui.workspaceNavigation.HasSelection() && !vaults.empty())
                 {
                     OpenVault(vaults[ui.workspaceNavigation.Selected()], context);
                 }
-                if (IsKeyPressed(ImGuiKey_N))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::WorkspaceNew))
                 {
                     BeginWorkspaceCreate(context);
                 }
-                if (IsKeyPressed(ImGuiKey_D) && ui.workspaceNavigation.HasSelection() && !vaults.empty())
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::WorkspaceRemove) && ui.workspaceNavigation.HasSelection() && !vaults.empty())
                 {
                     const auto id = vaults[ui.workspaceNavigation.Selected()].id;
                     if (workspace.WorkspaceRegistry().RemoveVault(id))
@@ -67,7 +68,7 @@ namespace Software::Modes::Slate
                         SetStatus("workspace removed from list");
                     }
                 }
-                if (IsKeyPressed(ImGuiKey_Escape))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                 {
                     if (workspace.HasWorkspaceLoaded())
                     {
@@ -83,7 +84,7 @@ namespace Software::Modes::Slate
 
         if (ui.workspaceView == Software::Slate::SlateWorkspaceView::Setup)
         {
-            DrawWorkspaceSetup();
+            DrawWorkspaceSetup(context);
         }
         else
         {
@@ -93,10 +94,19 @@ namespace Software::Modes::Slate
 
     std::string SlateWorkspaceMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const
     {
-        const auto& ui = UiState(const_cast<Software::Core::Runtime::AppContext&>(context));
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        const auto& ui = UiState(mutableContext);
+        const auto& shortcuts = WorkspaceContext(mutableContext).Shortcuts();
+        const std::string choose = "(" + shortcuts.Label(Software::Slate::ShortcutAction::NavigateUp) + "/" +
+                                   shortcuts.Label(Software::Slate::ShortcutAction::NavigateDown) + ") choose";
         return ui.workspaceView == Software::Slate::SlateWorkspaceView::Setup
-                   ? "(n) new   (:) command   (q) quit"
-                   : "(up/down) choose   (enter) switch   (n) new   (d) remove   (esc) home";
+                   ? shortcuts.Helper(Software::Slate::ShortcutAction::WorkspaceNew, "new") + "   " +
+                         shortcuts.Helper(Software::Slate::ShortcutAction::CommandPalette, "command") + "   " +
+                         shortcuts.Helper(Software::Slate::ShortcutAction::Quit, "quit")
+                   : choose + "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "switch") + "   " +
+                         shortcuts.Helper(Software::Slate::ShortcutAction::WorkspaceNew, "new") + "   " +
+                         shortcuts.Helper(Software::Slate::ShortcutAction::WorkspaceRemove, "remove") + "   " +
+                         shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
     }
 
     void SlateWorkspaceMode::BeginWorkspaceCreate(Software::Core::Runtime::AppContext& context)
@@ -141,7 +151,7 @@ namespace Software::Modes::Slate
                     });
     }
 
-    void SlateWorkspaceMode::DrawWorkspaceSetup()
+    void SlateWorkspaceMode::DrawWorkspaceSetup(Software::Core::Runtime::AppContext& context)
     {
         ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.18f));
         TextCentered("Slate", Cyan);
@@ -154,9 +164,10 @@ namespace Software::Modes::Slate
         const float columnWidth = 360.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - columnWidth) * 0.5f);
         ImGui::BeginGroup();
-        TextLine("n", "new");
-        TextLine(":", "command");
-        TextLine("q", "quit");
+        const auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::WorkspaceNew).c_str(), "new");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::CommandPalette).c_str(), "command");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Quit).c_str(), "quit");
         ImGui::EndGroup();
 
         const std::string defaultPath =

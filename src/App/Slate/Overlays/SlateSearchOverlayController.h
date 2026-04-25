@@ -2,6 +2,7 @@
 
 #include "App/Slate/Core/NavigationController.h"
 #include "App/Slate/Core/SlateTypes.h"
+#include "App/Slate/Input/ShortcutService.h"
 #include "Core/Runtime/AppContext.h"
 
 #include <functional>
@@ -69,7 +70,7 @@ namespace Software::Slate
         void SetQuery(std::string query, bool resetSelection = true);
 
         /** Returns helper text for the global status bar. */
-        std::string HelperText() const;
+        std::string HelperText(const ShortcutService& shortcuts) const;
 
         /** Draws the overlay and handles local keyboard input. */
         void Draw(Software::Core::Runtime::AppContext& context, const SearchOverlayCallbacks& callbacks);

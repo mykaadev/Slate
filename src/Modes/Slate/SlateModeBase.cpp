@@ -68,7 +68,7 @@ namespace Software::Modes::Slate
         const bool handleInput = !overlayOpen;
         if (m_helpOpen)
         {
-            DrawHelp();
+            DrawHelp(context);
         }
         else
         {
@@ -108,27 +108,31 @@ namespace Software::Modes::Slate
         return false;
     }
 
-    void SlateModeBase::DrawHelp() const
+    void SlateModeBase::DrawHelp(Software::Core::Runtime::AppContext& context) const
     {
+        const auto& shortcuts = WorkspaceContext(context).Shortcuts();
         ImGui::TextColored(Cyan, "shortcuts");
         ImGui::Separator();
-        TextLine("arrows", "move");
-        TextLine("enter", "open");
-        TextLine("esc", "back");
-        TextLine("/", "search");
-        TextLine(":", "command");
-        TextLine("^s", "save");
-        TextLine("j", "journal");
-        TextLine("n", "new");
-        TextLine("f", "files");
-        TextLine("t", "todos");
-        TextLine("c", "config");
-        TextLine("a", "folder");
-        TextLine("w", "workspaces");
-        TextLine("m", "move");
-        TextLine("d", "delete");
-        TextLine("?", "help");
-        TextLine("q", "quit");
+        TextLine((shortcuts.Label(Software::Slate::ShortcutAction::NavigateUp) + "/" +
+                  shortcuts.Label(Software::Slate::ShortcutAction::NavigateDown)).c_str(), "move");
+        TextLine((shortcuts.Label(Software::Slate::ShortcutAction::NavigateLeft) + "/" +
+                  shortcuts.Label(Software::Slate::ShortcutAction::NavigateRight)).c_str(), "tree nav");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Accept).c_str(), "open/accept");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Cancel).c_str(), "back/cancel");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserFilter).c_str(), "search/filter");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::CommandPalette).c_str(), "command");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::EditorSave).c_str(), "save");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeJournal).c_str(), "journal");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeNewNote).c_str(), "new");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeFiles).c_str(), "files");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeTodos).c_str(), "todos");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeSettings).c_str(), "config");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserNewFolder).c_str(), "folder");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeWorkspaces).c_str(), "workspaces");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserMove).c_str(), "move path");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserDelete).c_str(), "delete");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::ToggleHelp).c_str(), "help");
+        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Quit).c_str(), "quit");
     }
 
     void SlateModeBase::DrawFooterControls(Software::Core::Runtime::AppContext& context)
@@ -852,7 +856,7 @@ namespace Software::Modes::Slate
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
 
-        if (IsKeyPressed(ImGuiKey_Escape))
+        if (WorkspaceContext(context).Shortcuts().Pressed(Software::Slate::ShortcutAction::Cancel))
         {
             m_prompt = {};
         }
@@ -873,18 +877,20 @@ namespace Software::Modes::Slate
         TextCentered(m_confirm.message.c_str(), m_confirm.destructive ? Red : Amber);
         ImGui::Dummy(ImVec2(1.0f, 12.0f));
 
-        std::string actions = "(y) " + m_confirm.acceptLabel;
+        const auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        std::string actions = shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmAccept, m_confirm.acceptLabel);
         if (!m_confirm.declineLabel.empty())
         {
-            actions += "   (n) " + m_confirm.declineLabel;
+            actions += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmDecline, m_confirm.declineLabel);
         }
-        actions += "   (esc) " + m_confirm.cancelLabel;
+        actions += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, m_confirm.cancelLabel);
         DrawShortcutTextCentered(actions);
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
 
-        if (IsKeyPressed(ImGuiKey_Y) || IsKeyPressed(ImGuiKey_Enter) || IsKeyPressed(ImGuiKey_KeypadEnter))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::ConfirmAccept) ||
+            shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
         {
             auto callback = std::move(m_confirm.callback);
             m_confirm = {};
@@ -893,7 +899,7 @@ namespace Software::Modes::Slate
                 callback(true, context);
             }
         }
-        else if (!m_confirm.declineLabel.empty() && IsKeyPressed(ImGuiKey_N))
+        else if (!m_confirm.declineLabel.empty() && shortcuts.Pressed(Software::Slate::ShortcutAction::ConfirmDecline))
         {
             auto callback = std::move(m_confirm.callback);
             m_confirm = {};
@@ -902,7 +908,7 @@ namespace Software::Modes::Slate
                 callback(false, context);
             }
         }
-        else if (IsKeyPressed(ImGuiKey_Escape))
+        else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
         {
             m_confirm = {};
         }
@@ -928,40 +934,43 @@ namespace Software::Modes::Slate
 
     std::string SlateModeBase::HelperText(const Software::Core::Runtime::AppContext& context) const
     {
+        const auto& shortcuts = WorkspaceContext(const_cast<Software::Core::Runtime::AppContext&>(context)).Shortcuts();
         if (m_helpOpen)
         {
-            return "(esc) close   (?) help";
+            return shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "close") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::ToggleHelp, "help");
         }
         if (m_searchOverlayOpen)
         {
             if (auto* search = SearchOverlay(const_cast<Software::Core::Runtime::AppContext&>(context)))
             {
-                return search->HelperText();
+                return search->HelperText(shortcuts);
             }
         }
         if (m_workspaceOverlayOpen)
         {
             if (auto* workspaces = WorkspaceSwitcherOverlay(const_cast<Software::Core::Runtime::AppContext&>(context)))
             {
-                return workspaces->HelperText();
+                return workspaces->HelperText(shortcuts);
             }
         }
         if (auto* todos = TodoOverlay(const_cast<Software::Core::Runtime::AppContext&>(context)); todos && todos->IsAnyOpen())
         {
-            return todos->HelperText();
+            return todos->HelperText(shortcuts);
         }
         if (m_prompt.open)
         {
-            return "(enter) accept   (esc) cancel";
+            return shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "accept") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "cancel");
         }
         if (m_confirm.open)
         {
-            std::string helper = "(y) " + m_confirm.acceptLabel;
+            std::string helper = shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmAccept, m_confirm.acceptLabel);
             if (!m_confirm.declineLabel.empty())
             {
-                helper += "   (n) " + m_confirm.declineLabel;
+                helper += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmDecline, m_confirm.declineLabel);
             }
-            helper += "   (esc) " + m_confirm.cancelLabel;
+            helper += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, m_confirm.cancelLabel);
             return helper;
         }
 
@@ -971,8 +980,9 @@ namespace Software::Modes::Slate
     void SlateModeBase::HandleGlobalKeys(Software::Core::Runtime::AppContext& context)
     {
         const ImGuiIO& io = ImGui::GetIO();
+        auto& shortcuts = WorkspaceContext(context).Shortcuts();
 
-        if (IsCtrlPressed(ImGuiKey_S))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorSave))
         {
             SaveActiveDocument(context);
         }
@@ -985,7 +995,8 @@ namespace Software::Modes::Slate
 
         if (m_helpOpen)
         {
-            if (IsShiftQuestion() || IsKeyPressed(ImGuiKey_Escape))
+            if (shortcuts.Pressed(Software::Slate::ShortcutAction::ToggleHelp) ||
+                shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
             {
                 m_helpOpen = false;
             }
@@ -1008,35 +1019,35 @@ namespace Software::Modes::Slate
             return;
         }
 
-        if (IsShiftQuestion())
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::ToggleHelp))
         {
             m_helpOpen = true;
             return;
         }
 
-        if (io.KeyShift && IsKeyPressed(ImGuiKey_Semicolon))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::CommandPalette))
         {
             BeginCommandPrompt();
             return;
         }
 
-        if (IsKeyPressed(ImGuiKey_W))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeWorkspaces))
         {
             ShowWorkspaceSwitcher(context);
             return;
         }
-        if (IsKeyPressed(ImGuiKey_T))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeTodos))
         {
             ShowTodos(context);
             return;
         }
-        if (IsKeyPressed(ImGuiKey_C))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::HomeSettings))
         {
             ShowSettings(context);
             return;
         }
 
-        if (IsCtrlPressed(ImGuiKey_Q))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::Quit))
         {
             BeginQuitConfirm();
         }

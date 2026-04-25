@@ -9,6 +9,8 @@ namespace Software::Slate
             return;
         }
 
+        m_shortcuts.Initialize();
+
         m_themeSettings = ThemeService::DefaultSettings();
         m_theme.Apply(m_themeSettings);
         m_editorSettings = EditorSettingsService::DefaultSettings();
@@ -146,6 +148,16 @@ namespace Software::Slate
         return m_workspaceRegistry;
     }
 
+    ShortcutService& SlateWorkspaceContext::Shortcuts()
+    {
+        return m_shortcuts;
+    }
+
+    const ShortcutService& SlateWorkspaceContext::Shortcuts() const
+    {
+        return m_shortcuts;
+    }
+
     const ThemeSettings& SlateWorkspaceContext::CurrentThemeSettings() const
     {
         return m_themeSettings;
@@ -196,6 +208,8 @@ namespace Software::Slate
         m_lastScanSeconds = 0.0;
         m_lastIndexSeconds = 0.0;
         m_workspaceLoaded = true;
+
+        m_shortcuts.Initialize();
 
         m_themeSettings = ThemeService::DefaultSettings();
         std::string themeError;

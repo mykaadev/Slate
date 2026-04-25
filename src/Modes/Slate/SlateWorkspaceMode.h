@@ -18,7 +18,7 @@ namespace Software::Modes::Slate
         // Starts workspace creation
         void BeginWorkspaceCreate(Software::Core::Runtime::AppContext& context);
         // Draws the workspace setup body
-        void DrawWorkspaceSetup();
+        void DrawWorkspaceSetup(Software::Core::Runtime::AppContext& context);
         // Draws the workspace switcher body
         void DrawWorkspaceSwitcher(Software::Core::Runtime::AppContext& context);
     };

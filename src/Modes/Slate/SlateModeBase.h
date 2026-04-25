@@ -37,7 +37,7 @@ namespace Software::Modes::Slate
         virtual void DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput) = 0;
         virtual std::string ModeHelperText(const Software::Core::Runtime::AppContext& context) const = 0;
         virtual bool WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const;
-        virtual void DrawHelp() const;
+        virtual void DrawHelp(Software::Core::Runtime::AppContext& context) const;
         virtual void DrawFooterControls(Software::Core::Runtime::AppContext& context);
 
         Software::Slate::SlateWorkspaceContext& WorkspaceContext(Software::Core::Runtime::AppContext& context) const;

@@ -124,3 +124,7 @@ SlateModeBase
 ```
 
 Do not add new todo UI state or markdown mutation behavior back to `SlateModeBase`. If another mode needs todo behavior, it should resolve `SlateTodoOverlayController` or execute a command registered by `slate.todos`.
+
+## Shortcut ownership
+
+Keyboard bindings are owned by `Slate.Input` / `ShortcutService`. New modules should register or consume stable shortcut actions instead of hardcoding display text like `(ctrl+s)` or direct key checks. Defaults live in `src/App/Slate/Input/ShortcutService.cpp`; user overrides are written to `config/input/shortcuts.tsv` by the settings/config screen. Shortcut editing uses an input-capture modal rather than cycling hardcoded choices.

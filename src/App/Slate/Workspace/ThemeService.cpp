@@ -2,6 +2,7 @@
 
 #include "App/Slate/Core/PathUtils.h"
 #include "App/Slate/Core/SettingsFile.h"
+#include "App/Slate/Core/AppPaths.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include <algorithm>
@@ -336,7 +337,7 @@ namespace Software::Slate
 
     fs::path ThemeService::SettingsPath() const
     {
-        return m_workspaceRoot.empty() ? fs::path() : (m_workspaceRoot / ".slate" / "theme.tsv");
+        return AppPaths::ConfigFile("appearance", "theme.tsv");
     }
 
     void ThemeService::EnsurePresetsLoaded() const
@@ -427,6 +428,14 @@ namespace Software::Slate
         if (!settingsPath.empty())
         {
             std::ifstream file(settingsPath, std::ios::binary);
+            if (!file)
+            {
+                file.open(AppPaths::LegacyConfigFile("theme.tsv"), std::ios::binary);
+            }
+            if (!file && !m_workspaceRoot.empty())
+            {
+                file.open(m_workspaceRoot / ".slate" / "theme.tsv", std::ios::binary);
+            }
             if (file)
             {
                 std::string line;

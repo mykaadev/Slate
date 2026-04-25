@@ -1,6 +1,7 @@
 #include "App/Slate/Workspace/WorkspaceRegistryService.h"
 
 #include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Core/AppPaths.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -29,12 +30,6 @@ namespace Software::Slate
             }
             return parts;
         }
-
-        fs::path EnvPath(const char* name)
-        {
-            const char* value = std::getenv(name);
-            return value ? fs::path(value) : fs::path();
-        }
     }
 
     WorkspaceRegistryService::WorkspaceRegistryService(fs::path settingsPath)
@@ -48,6 +43,10 @@ namespace Software::Slate
         m_activeVaultId.clear();
 
         std::ifstream file(m_settingsPath, std::ios::binary);
+        if (!file && m_settingsPath == DefaultSettingsPath())
+        {
+            file.open(AppPaths::LegacyConfigFile("settings.tsv"), std::ios::binary);
+        }
         if (!file)
         {
             return true;
@@ -209,21 +208,12 @@ namespace Software::Slate
 
     fs::path WorkspaceRegistryService::DefaultSettingsPath()
     {
-        fs::path base = EnvPath("APPDATA");
-        if (base.empty())
-        {
-            base = EnvPath("USERPROFILE");
-        }
-        if (base.empty())
-        {
-            base = fs::current_path();
-        }
-        return base / "Slate" / "settings.tsv";
+        return AppPaths::ConfigFile("workspace", "settings.tsv");
     }
 
     fs::path WorkspaceRegistryService::DefaultWorkspaceRoot()
     {
-        fs::path user = EnvPath("USERPROFILE");
+        fs::path user = AppPaths::UserHomeDirectory();
         if (user.empty())
         {
             return fs::current_path() / "Documents" / "Slate Workspaces";

@@ -3,6 +3,7 @@
 #include "App/Slate/Documents/AssetService.h"
 #include "App/Slate/Documents/DocumentService.h"
 #include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Input/ShortcutService.h"
 #include "App/Slate/Documents/LinkService.h"
 #include "App/Slate/Workspace/SearchService.h"
 #include "App/Slate/Workspace/ThemeService.h"
@@ -61,6 +62,11 @@ namespace Software::Slate
         WorkspaceRegistryService& WorkspaceRegistry();
         // Returns the workspace registry service as const
         const WorkspaceRegistryService& WorkspaceRegistry() const;
+
+        // Returns the configurable shortcut service
+        ShortcutService& Shortcuts();
+        // Returns the configurable shortcut service as const
+        const ShortcutService& Shortcuts() const;
 
         // Returns the live theme settings
         const ThemeSettings& CurrentThemeSettings() const;
@@ -127,6 +133,8 @@ namespace Software::Slate
         EditorSettingsService m_editorSettingsService;
         // Stores the workspace registry
         WorkspaceRegistryService m_workspaceRegistry;
+        // Stores configurable shortcut bindings
+        ShortcutService m_shortcuts;
         // Stores the current theme settings
         ThemeSettings m_themeSettings = ThemeService::DefaultSettings();
         // Stores the current editor settings
