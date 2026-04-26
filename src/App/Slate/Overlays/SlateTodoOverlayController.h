@@ -169,5 +169,8 @@ namespace Software::Slate
 
         /** Current state filter index, where zero means all states. */
         int m_stateFilter = 0;
+
+        /** Defers a double-click open until after ImGui child/style cleanup has completed. */
+        bool m_pendingOpenAfterListDraw = false;
     };
 }

@@ -202,7 +202,7 @@ namespace Software::Slate
         if (m_form.open)
         {
             return "(" + shortcuts.Label(ShortcutAction::NavigateUp) + "/" +
-                   shortcuts.Label(ShortcutAction::NavigateDown) + ") field   " +
+                   shortcuts.Label(ShortcutAction::NavigateDown) + ") move   " +
                    shortcuts.Helper(ShortcutAction::TodoState, "state") + "   " +
                    shortcuts.Helper(ShortcutAction::TodoPriority, "priority") + "   " +
                    shortcuts.Helper(ShortcutAction::EditorSave, "save") + "   " +
@@ -446,9 +446,7 @@ namespace Software::Slate
                 if (allowInput && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 {
                     m_navigation.SetSelected(rowIndex);
-                    OpenSelected(context, callbacks);
-                    ImGui::PopID();
-                    return;
+                    m_pendingOpenAfterListDraw = true;
                 }
                 ImGui::PopID();
 
@@ -466,6 +464,13 @@ namespace Software::Slate
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
+
+        if (m_pendingOpenAfterListDraw)
+        {
+            m_pendingOpenAfterListDraw = false;
+            OpenSelected(context, callbacks);
+            return;
+        }
 
         if (allowInput && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !overlayHovered)
         {
