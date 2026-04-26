@@ -9,7 +9,7 @@ set(SOFTWARE_TARGET_NAME "Slate" CACHE STRING "CMake target/executable name" FOR
 set(SOFTWARE_APP_NAME "Slate" CACHE STRING "Application display name" FORCE)
 
 # Semantic version string.
-set(SOFTWARE_APP_VERSION "0.1.0" CACHE STRING "Application version" FORCE)
+set(SOFTWARE_APP_VERSION "0.3.0" CACHE STRING "Application version" FORCE)
 
-# Optional: organization/vendor name.
-set(SOFTWARE_ORG_NAME "Slate" CACHE STRING "Organization/vendor" FORCE)
+# organization/vendor name.
+set(SOFTWARE_ORG_NAME "mykaadev" CACHE STRING "Organization/vendor" FORCE)
