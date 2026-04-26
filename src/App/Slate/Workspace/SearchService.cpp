@@ -8,6 +8,36 @@
 
 namespace Software::Slate
 {
+    namespace
+    {
+        std::string StripEmbeddedImageData(const std::string& text)
+        {
+            std::string out;
+            out.reserve(text.size());
+            std::size_t cursor = 0;
+            while (cursor < text.size())
+            {
+                const std::size_t data = text.find("data:image/", cursor);
+                if (data == std::string::npos)
+                {
+                    out.append(text, cursor, std::string::npos);
+                    break;
+                }
+
+                out.append(text, cursor, data - cursor);
+                out += "data:image/*;base64,<embedded image>";
+
+                std::size_t end = data;
+                while (end < text.size() && text[end] != ')' && text[end] != '\n' && text[end] != '\r')
+                {
+                    ++end;
+                }
+                cursor = end;
+            }
+            return out;
+        }
+    }
+
     void SearchService::Rebuild(const WorkspaceService& workspace)
     {
         m_files.clear();
@@ -19,13 +49,15 @@ namespace Software::Slate
                 continue;
             }
 
+            const std::string searchableText = StripEmbeddedImageData(text);
+
             IndexedFile file;
             file.relativePath = relativePath;
-            file.lines = MarkdownService::SplitLines(text);
+            file.lines = MarkdownService::SplitLines(searchableText);
             file.title = MarkdownService::TitleFromText(text, relativePath);
             file.lowerPath = PathUtils::ToLower(relativePath.generic_string());
             file.lowerTitle = PathUtils::ToLower(file.title);
-            file.lowerBody = PathUtils::ToLower(text);
+            file.lowerBody = PathUtils::ToLower(searchableText);
             m_files.push_back(std::move(file));
         }
     }
@@ -131,7 +163,7 @@ namespace Software::Slate
             return results;
         }
 
-        const auto lines = MarkdownService::SplitLines(text);
+        const auto lines = MarkdownService::SplitLines(StripEmbeddedImageData(text));
         for (std::size_t i = 0; i < lines.size(); ++i)
         {
             const std::string lowerLine = PathUtils::ToLower(lines[i]);

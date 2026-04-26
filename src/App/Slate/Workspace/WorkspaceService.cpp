@@ -492,7 +492,7 @@ namespace Software::Slate
 #endif
 
             std::ostringstream text;
-            text << "# " << std::put_time(&localTime, "%Y-%m-%d") << "\n\n- ";
+            text << "# " << std::put_time(&localTime, "%Y-%m-%d") << "\n\n---\n";
             fs::path created;
             if (!CreateMarkdownFile(daily, text.str(), &created, error))
             {

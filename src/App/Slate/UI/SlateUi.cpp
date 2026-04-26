@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <unordered_map>
 #include <string_view>
 
@@ -15,6 +16,7 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#include <objidl.h>
 #include <gdiplus.h>
 #include <GLFW/glfw3.h>
 #endif
@@ -119,6 +121,171 @@ namespace Software::Slate::UI
                          GL_RGBA,
                          GL_UNSIGNED_BYTE,
                          pixels.data());
+
+            out->texture = texture;
+            out->width = width;
+            out->height = height;
+            out->failed = false;
+            return texture != 0;
+        }
+
+        int Base64Value(char ch)
+        {
+            if (ch >= 'A' && ch <= 'Z')
+            {
+                return ch - 'A';
+            }
+            if (ch >= 'a' && ch <= 'z')
+            {
+                return 26 + ch - 'a';
+            }
+            if (ch >= '0' && ch <= '9')
+            {
+                return 52 + ch - '0';
+            }
+            if (ch == '+')
+            {
+                return 62;
+            }
+            if (ch == '/')
+            {
+                return 63;
+            }
+            return -1;
+        }
+
+        bool DecodeBase64(std::string_view input, std::vector<unsigned char>* out)
+        {
+            if (!out)
+            {
+                return false;
+            }
+
+            std::vector<unsigned char> bytes;
+            int value = 0;
+            int bits = -8;
+            for (const char ch : input)
+            {
+                if (std::isspace(static_cast<unsigned char>(ch)))
+                {
+                    continue;
+                }
+                if (ch == '=')
+                {
+                    break;
+                }
+                const int decoded = Base64Value(ch);
+                if (decoded < 0)
+                {
+                    return false;
+                }
+                value = (value << 6) | decoded;
+                bits += 6;
+                if (bits >= 0)
+                {
+                    bytes.push_back(static_cast<unsigned char>((value >> bits) & 0xFF));
+                    bits -= 8;
+                }
+            }
+
+            *out = std::move(bytes);
+            return !out->empty();
+        }
+
+        bool DataUriImageBytes(std::string_view target, std::vector<unsigned char>* out)
+        {
+            constexpr std::string_view prefix = "data:image/";
+            if (target.substr(0, prefix.size()) != prefix)
+            {
+                return false;
+            }
+            const std::size_t comma = target.find(',');
+            if (comma == std::string_view::npos)
+            {
+                return false;
+            }
+            const std::string_view header = target.substr(0, comma);
+            if (header.find(";base64") == std::string_view::npos)
+            {
+                return false;
+            }
+            return DecodeBase64(target.substr(comma + 1), out);
+        }
+
+        bool LoadTextureFromMemory(const std::vector<unsigned char>& bytes, CachedImageTexture* out)
+        {
+            static GdiplusSession gdiplus;
+            if (!out || !gdiplus.ok || bytes.empty())
+            {
+                return false;
+            }
+
+            HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes.size());
+            if (!memory)
+            {
+                return false;
+            }
+
+            void* target = GlobalLock(memory);
+            if (!target)
+            {
+                GlobalFree(memory);
+                return false;
+            }
+            std::memcpy(target, bytes.data(), bytes.size());
+            GlobalUnlock(memory);
+
+            IStream* stream = nullptr;
+            if (CreateStreamOnHGlobal(memory, TRUE, &stream) != S_OK || !stream)
+            {
+                GlobalFree(memory);
+                return false;
+            }
+
+            Gdiplus::Bitmap bitmap(stream, false);
+            if (bitmap.GetLastStatus() != Gdiplus::Ok || bitmap.GetWidth() == 0 || bitmap.GetHeight() == 0)
+            {
+                stream->Release();
+                return false;
+            }
+
+            const int width = static_cast<int>(bitmap.GetWidth());
+            const int height = static_cast<int>(bitmap.GetHeight());
+            Gdiplus::Rect rect(0, 0, width, height);
+            Gdiplus::BitmapData data{};
+            if (bitmap.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &data) != Gdiplus::Ok)
+            {
+                stream->Release();
+                return false;
+            }
+
+            std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+            const auto* source = static_cast<const unsigned char*>(data.Scan0);
+            const int stride = data.Stride;
+            for (int y = 0; y < height; ++y)
+            {
+                const unsigned char* sourceRow = stride >= 0
+                                                     ? source + y * stride
+                                                     : source + (height - 1 - y) * (-stride);
+                for (int x = 0; x < width; ++x)
+                {
+                    const std::size_t dest = (static_cast<std::size_t>(y) * width + x) * 4;
+                    pixels[dest + 0] = sourceRow[x * 4 + 2];
+                    pixels[dest + 1] = sourceRow[x * 4 + 1];
+                    pixels[dest + 2] = sourceRow[x * 4 + 0];
+                    pixels[dest + 3] = sourceRow[x * 4 + 3];
+                }
+            }
+            bitmap.UnlockBits(&data);
+            stream->Release();
+
+            unsigned int texture = 0;
+            glGenTextures(1, &texture);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 
             out->texture = texture;
             out->width = width;
@@ -281,7 +448,7 @@ namespace Software::Slate::UI
     }
 
     TextInputResult InputTextMultilineString(const char* label, std::string& text, const ImVec2& size,
-                                             ImGuiInputTextFlags flags, int* cursorPos)
+                                             ImGuiInputTextFlags flags, int* cursorPos, int requestedCursorPos)
     {
         if (text.capacity() < text.size() + 4096)
         {
@@ -291,6 +458,7 @@ namespace Software::Slate::UI
         TextInputPayload payload;
         payload.text = &text;
         payload.cursorPos = cursorPos;
+        payload.requestedCursorPos = requestedCursorPos;
         flags |= ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_CallbackAlways |
                  ImGuiInputTextFlags_CallbackEdit | ImGuiInputTextFlags_AllowTabInput;
         const bool submitted = ImGui::InputTextMultiline(label, text.data(), text.capacity() + 1, size, flags,
@@ -576,15 +744,26 @@ namespace Software::Slate::UI
             }
         };
 
-        const std::string cacheKey = absolutePath.empty() ? std::string(target)
-                                                          : absolutePath.lexically_normal().string();
+        const bool embeddedDataImage = target.rfind("data:image/", 0) == 0;
+        const std::string cacheKey = embeddedDataImage
+                                         ? (std::string("data-image-") + std::to_string(std::hash<std::string_view>{}(target)))
+                                         : (absolutePath.empty() ? std::string(target)
+                                                                 : absolutePath.lexically_normal().string());
         ImGui::PushID(cacheKey.c_str());
 
 #if defined(_WIN32)
         auto& cached = ImageCache()[cacheKey];
         if (cached.texture == 0 && !cached.failed)
         {
-            cached.failed = !LoadTextureFromFile(absolutePath, &cached);
+            if (embeddedDataImage)
+            {
+                std::vector<unsigned char> bytes;
+                cached.failed = !DataUriImageBytes(target, &bytes) || !LoadTextureFromMemory(bytes, &cached);
+            }
+            else
+            {
+                cached.failed = !LoadTextureFromFile(absolutePath, &cached);
+            }
         }
 
         if (cached.texture != 0 && cached.width > 0 && cached.height > 0)

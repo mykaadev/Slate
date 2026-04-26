@@ -124,6 +124,10 @@ namespace Software::Slate
                     {
                         SettingsFile::ParseBool(value, &settings.pasteClipboardImages);
                     }
+                    else if (key == "image_storage_policy")
+                    {
+                        SettingsFile::ParseInt(value, &settings.imageStoragePolicy);
+                    }
                 }
 
                 if (file.bad())
@@ -196,6 +200,7 @@ namespace Software::Slate
         file << "indent_with_tabs\t" << SettingsFile::SerializeBool(sanitized.indentWithTabs) << '\n';
         file << "auto_list_continuation\t" << SettingsFile::SerializeBool(sanitized.autoListContinuation) << '\n';
         file << "paste_clipboard_images\t" << SettingsFile::SerializeBool(sanitized.pasteClipboardImages) << '\n';
+        file << "image_storage_policy\t" << SettingsFile::SerializeInt(sanitized.imageStoragePolicy) << '\n';
         return static_cast<bool>(file);
     }
 
@@ -218,6 +223,9 @@ namespace Software::Slate
         sanitized.scrollMotion = std::clamp(sanitized.scrollMotion, 0, 2);
         sanitized.scrollbarStyle = std::clamp(sanitized.scrollbarStyle, 0, 2);
         sanitized.caretMotion = std::clamp(sanitized.caretMotion, 0, 2);
+        sanitized.imageStoragePolicy = std::clamp(sanitized.imageStoragePolicy,
+                                                 static_cast<int>(ImageStoragePolicy::WorkspaceMediaFolder),
+                                                 static_cast<int>(ImageStoragePolicy::EmbedInMarkdown));
         return sanitized;
     }
 }

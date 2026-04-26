@@ -32,7 +32,7 @@ namespace Software::Slate
                 Bind(ImGuiKey_Enter), Bind(ImGuiKey_Enter, false, true), Bind(ImGuiKey_Escape), Bind(ImGuiKey_Tab), Bind(ImGuiKey_Slash),
                 Bind(ImGuiKey_UpArrow), Bind(ImGuiKey_DownArrow), Bind(ImGuiKey_LeftArrow), Bind(ImGuiKey_RightArrow),
                 Bind(ImGuiKey_Delete), Bind(ImGuiKey_Backspace),
-                Bind(ImGuiKey_A), Bind(ImGuiKey_C), Bind(ImGuiKey_D), Bind(ImGuiKey_F), Bind(ImGuiKey_J),
+                Bind(ImGuiKey_A), Bind(ImGuiKey_C), Bind(ImGuiKey_D), Bind(ImGuiKey_E), Bind(ImGuiKey_F), Bind(ImGuiKey_J),
                 Bind(ImGuiKey_M), Bind(ImGuiKey_N), Bind(ImGuiKey_O), Bind(ImGuiKey_P), Bind(ImGuiKey_Q),
                 Bind(ImGuiKey_R), Bind(ImGuiKey_S), Bind(ImGuiKey_T), Bind(ImGuiKey_W), Bind(ImGuiKey_X), Bind(ImGuiKey_Y),
                 Bind(ImGuiKey_Slash, false, true), Bind(ImGuiKey_Slash, true),
@@ -68,6 +68,7 @@ namespace Software::Slate
             case ImGuiKey_A: return "a";
             case ImGuiKey_C: return "c";
             case ImGuiKey_D: return "d";
+            case ImGuiKey_E: return "e";
             case ImGuiKey_F: return "f";
             case ImGuiKey_J: return "j";
             case ImGuiKey_M: return "m";
@@ -94,7 +95,7 @@ namespace Software::Slate
                 {"up", ImGuiKey_UpArrow}, {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow},
                 {"right", ImGuiKey_RightArrow}, {"del", ImGuiKey_Delete}, {"delete", ImGuiKey_Delete},
                 {"backspace", ImGuiKey_Backspace},
-                {"a", ImGuiKey_A}, {"c", ImGuiKey_C}, {"d", ImGuiKey_D}, {"f", ImGuiKey_F},
+                {"a", ImGuiKey_A}, {"c", ImGuiKey_C}, {"d", ImGuiKey_D}, {"e", ImGuiKey_E}, {"f", ImGuiKey_F},
                 {"j", ImGuiKey_J}, {"m", ImGuiKey_M}, {"n", ImGuiKey_N}, {"o", ImGuiKey_O},
                 {"p", ImGuiKey_P}, {"q", ImGuiKey_Q}, {"r", ImGuiKey_R}, {"s", ImGuiKey_S},
                 {"t", ImGuiKey_T}, {"w", ImGuiKey_W}, {"x", ImGuiKey_X}, {"y", ImGuiKey_Y},
@@ -117,7 +118,7 @@ namespace Software::Slate
                 ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Tab, ImGuiKey_Slash,
                 ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_LeftArrow, ImGuiKey_RightArrow,
                 ImGuiKey_Delete, ImGuiKey_Backspace,
-                ImGuiKey_A, ImGuiKey_C, ImGuiKey_D, ImGuiKey_F, ImGuiKey_J, ImGuiKey_M,
+                ImGuiKey_A, ImGuiKey_C, ImGuiKey_D, ImGuiKey_E, ImGuiKey_F, ImGuiKey_J, ImGuiKey_M,
                 ImGuiKey_N, ImGuiKey_O, ImGuiKey_P, ImGuiKey_Q, ImGuiKey_R, ImGuiKey_S,
                 ImGuiKey_T, ImGuiKey_W, ImGuiKey_X, ImGuiKey_Y,
             };
@@ -139,6 +140,24 @@ namespace Software::Slate
         RegisterDefaults();
         m_settingsPath = AppPaths::ConfigFile("input", "shortcuts.tsv");
         Load();
+
+        // Earlier todo-list builds used f/open and could persist that as a user override.
+        // The todo list now follows the rest of Slate: Enter opens the selected item.
+        if (SameBinding(Binding(ShortcutAction::TodoOpen), Bind(ImGuiKey_F)))
+        {
+            BindingMutable(ShortcutAction::TodoOpen) = Bind(ImGuiKey_Enter);
+        }
+        // Older todo-form builds used bare Tab/P while text fields were focused.
+        // Move those defaults to Ctrl chords so state/priority changes do not type into the form.
+        if (SameBinding(Binding(ShortcutAction::TodoState), Bind(ImGuiKey_Tab)))
+        {
+            BindingMutable(ShortcutAction::TodoState) = Bind(ImGuiKey_Tab, true);
+        }
+        if (SameBinding(Binding(ShortcutAction::TodoPriority), Bind(ImGuiKey_P)))
+        {
+            BindingMutable(ShortcutAction::TodoPriority) = Bind(ImGuiKey_P, true);
+        }
+
         m_initialized = true;
     }
 
@@ -169,20 +188,22 @@ namespace Software::Slate
         add(ShortcutAction::HomeSettings, "home.settings", "home", "Config", Bind(ImGuiKey_C));
         add(ShortcutAction::HomeWorkspaces, "home.workspaces", "home", "Workspaces", Bind(ImGuiKey_W));
         add(ShortcutAction::BrowserFilter, "browser.filter", "browser", "Filter", Bind(ImGuiKey_Slash));
-        add(ShortcutAction::BrowserNewFolder, "browser.folder", "browser", "New folder", Bind(ImGuiKey_A));
+        add(ShortcutAction::BrowserNewFolder, "browser.folder", "browser", "New folder", Bind(ImGuiKey_F));
         add(ShortcutAction::BrowserMove, "browser.move", "browser", "Move", Bind(ImGuiKey_M));
-        add(ShortcutAction::BrowserDelete, "browser.delete", "browser", "Delete", Bind(ImGuiKey_D));
+        add(ShortcutAction::BrowserDelete, "browser.delete", "browser", "Delete", Bind(ImGuiKey_Delete));
         add(ShortcutAction::EditorSave, "editor.save", "editor", "Save", Bind(ImGuiKey_S, true));
         add(ShortcutAction::EditorPreview, "editor.preview", "editor", "Preview", Bind(ImGuiKey_P, true));
         add(ShortcutAction::EditorOutline, "editor.outline", "editor", "Outline", Bind(ImGuiKey_O, true));
         add(ShortcutAction::EditorFind, "editor.find", "editor", "Find", Bind(ImGuiKey_F, true));
         add(ShortcutAction::SearchPrevious, "search.previous", "search", "Previous match", Bind(ImGuiKey_Enter, false, true));
         add(ShortcutAction::SearchMode, "search.mode", "search", "Cycle search mode", Bind(ImGuiKey_Tab));
-        add(ShortcutAction::TodoState, "todo.state", "todos", "Todo state", Bind(ImGuiKey_Tab));
-        add(ShortcutAction::TodoOpen, "todo.open", "todos", "Open todo file", Bind(ImGuiKey_O));
+        add(ShortcutAction::TodoState, "todo.state", "todos", "Cycle todo state", Bind(ImGuiKey_Tab, true));
+        add(ShortcutAction::TodoPriority, "todo.priority", "todos", "Cycle todo priority", Bind(ImGuiKey_P, true));
+        add(ShortcutAction::TodoEdit, "todo.edit", "todos", "Edit todo metadata", Bind(ImGuiKey_E));
+        add(ShortcutAction::TodoOpen, "todo.open", "todos", "Open todo file", Bind(ImGuiKey_Enter));
         add(ShortcutAction::TodoDelete, "todo.delete", "todos", "Delete todo", Bind(ImGuiKey_Delete));
         add(ShortcutAction::WorkspaceNew, "workspace.new", "workspaces", "New workspace", Bind(ImGuiKey_N));
-        add(ShortcutAction::WorkspaceRemove, "workspace.remove", "workspaces", "Remove workspace", Bind(ImGuiKey_D));
+        add(ShortcutAction::WorkspaceRemove, "workspace.remove", "workspaces", "Remove workspace", Bind(ImGuiKey_Delete));
         add(ShortcutAction::SettingsReset, "settings.reset", "settings", "Reset settings", Bind(ImGuiKey_R));
         add(ShortcutAction::Quit, "shell.quit", "shell", "Quit", Bind(ImGuiKey_Q));
     }
@@ -339,6 +360,8 @@ namespace Software::Slate
         case ShortcutAction::SearchPrevious: return "search.previous";
         case ShortcutAction::SearchMode: return "search.mode";
         case ShortcutAction::TodoState: return "todo.state";
+        case ShortcutAction::TodoPriority: return "todo.priority";
+        case ShortcutAction::TodoEdit: return "todo.edit";
         case ShortcutAction::TodoOpen: return "todo.open";
         case ShortcutAction::TodoDelete: return "todo.delete";
         case ShortcutAction::WorkspaceNew: return "workspace.new";

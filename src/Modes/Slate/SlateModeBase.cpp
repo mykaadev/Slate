@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace Software::Modes::Slate
 {
@@ -448,14 +450,29 @@ namespace Software::Modes::Slate
 
     bool SlateModeBase::OpenTodayJournal(Software::Core::Runtime::AppContext& context)
     {
+        auto& workspaceContext = WorkspaceContext(context);
+        const auto expectedDailyPath = workspaceContext.Workspace().DailyNoteRelativePath();
+        const bool createdTodayNote =
+            !Software::Slate::fs::exists(workspaceContext.Workspace().Resolve(expectedDailyPath));
+
         Software::Slate::fs::path daily;
         std::string error;
-        if (!WorkspaceContext(context).OpenTodayJournal(&daily, &error))
+        if (!workspaceContext.OpenTodayJournal(&daily, &error))
         {
             SetError(error);
             return false;
         }
-        return OpenDocument(daily, context);
+
+        if (!OpenDocument(daily, context))
+        {
+            return false;
+        }
+
+        if (createdTodayNote)
+        {
+            EditorContext(context).JumpToLine(4);
+        }
+        return true;
     }
 
     void SlateModeBase::ShowBrowser(Software::Slate::SlateBrowserView view,
@@ -826,8 +843,8 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::DrawPromptOverlay(Software::Core::Runtime::AppContext& context)
     {
-        const ImVec2 size(std::min(560.0f, std::max(320.0f, ImGui::GetWindowWidth() * 0.50f)), 104.0f);
-        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, ImGui::GetWindowHeight() - 150.0f));
+        const ImVec2 size(std::min(620.0f, std::max(340.0f, ImGui::GetWindowWidth() * 0.54f)), 104.0f);
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, ImGui::GetWindowHeight() - size.y - 46.0f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);

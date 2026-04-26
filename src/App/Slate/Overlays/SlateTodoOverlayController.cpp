@@ -3,6 +3,7 @@
 #include "App/Slate/Core/PathUtils.h"
 #include "App/Slate/Documents/DocumentService.h"
 #include "App/Slate/Editor/SlateEditorContext.h"
+#include "App/Slate/Editor/SlashCommandService.h"
 #include "App/Slate/Markdown/MarkdownService.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/Todos/TodoService.h"
@@ -61,6 +62,23 @@ namespace Software::Slate
             }
         }
 
+
+        const ImVec4& TodoPriorityColor(TodoPriority priority)
+        {
+            switch (priority)
+            {
+            case TodoPriority::Low:
+                return Muted;
+            case TodoPriority::Normal:
+                return Cyan;
+            case TodoPriority::High:
+                return Amber;
+            case TodoPriority::Urgent:
+                return Red;
+            }
+            return Cyan;
+        }
+
         bool MatchesTodoFilter(const TodoTicket& todo, int filter)
         {
             switch (std::clamp(filter, 0, 4))
@@ -105,7 +123,6 @@ namespace Software::Slate
                 editor->ReleaseNativeEditorFocus();
             }
             m_listOpen = true;
-            m_focusSearch = true;
             m_navigation.Reset();
         }
     }
@@ -137,6 +154,7 @@ namespace Software::Slate
         m_form.requestTextFocus = true;
         m_form.focusField = TodoFormFocusField::Title;
         m_form.state = TodoState::Open;
+        m_form.priority = TodoPriority::Normal;
         m_form.replaceActiveLine = launchedFromTodoCommand;
         if (m_form.replaceActiveLine && active)
         {
@@ -151,15 +169,14 @@ namespace Software::Slate
 
         editor->ReleaseNativeEditorFocus();
         m_form.title = "Untitled todo";
+        m_form.description = "Description";
         m_form.open = true;
     }
 
     void SlateTodoOverlayController::Reset()
     {
         m_listOpen = false;
-        m_focusSearch = false;
         m_stateFilter = 0;
-        m_searchBuffer.clear();
         m_visibleTodos.clear();
         m_navigation.Reset();
         m_form = {};
@@ -184,16 +201,19 @@ namespace Software::Slate
     {
         if (m_form.open)
         {
-            return shortcuts.Helper(ShortcutAction::TodoState, "state") + "   " +
-                   shortcuts.Helper(ShortcutAction::Accept, "save") + "   " +
+            return "(" + shortcuts.Label(ShortcutAction::NavigateUp) + "/" +
+                   shortcuts.Label(ShortcutAction::NavigateDown) + ") field   " +
+                   shortcuts.Helper(ShortcutAction::TodoState, "state") + "   " +
+                   shortcuts.Helper(ShortcutAction::TodoPriority, "priority") + "   " +
+                   shortcuts.Helper(ShortcutAction::EditorSave, "save") + "   " +
                    shortcuts.Helper(ShortcutAction::Cancel, "cancel");
         }
         if (m_listOpen)
         {
-            return shortcuts.Helper(ShortcutAction::TodoState, "filter") + "   " +
-                   shortcuts.Helper(ShortcutAction::BrowserFilter, "search") + "   " +
-                   shortcuts.Helper(ShortcutAction::Accept, "edit") + "   " +
-                   shortcuts.Helper(ShortcutAction::TodoOpen, "focus") + "   " +
+            return "(" + shortcuts.Label(ShortcutAction::NavigateUp) + "/" +
+                   shortcuts.Label(ShortcutAction::NavigateDown) + ") move   " +
+                   shortcuts.Helper(ShortcutAction::TodoOpen, "open") + "   " +
+                   shortcuts.Helper(ShortcutAction::TodoEdit, "edit") + "   " +
                    shortcuts.Helper(ShortcutAction::TodoDelete, "delete") + "   " +
                    shortcuts.Helper(ShortcutAction::Cancel, "close");
         }
@@ -231,6 +251,7 @@ namespace Software::Slate
         m_form.mode = TodoFormMode::Edit;
         m_form.ticket = ticket;
         m_form.state = ticket.state;
+        m_form.priority = ticket.priority;
         m_form.title = ticket.title;
         m_form.description = ticket.description;
     }
@@ -257,21 +278,28 @@ namespace Software::Slate
         m_visibleTodos.erase(std::remove_if(m_visibleTodos.begin(),
                                             m_visibleTodos.end(),
                                             [this](const auto& todo) {
-                                                return !MatchesTodoFilter(todo, m_stateFilter) ||
-                                                       !TodoService::MatchesQuery(todo, m_searchBuffer);
+                                                return !MatchesTodoFilter(todo, m_stateFilter);
                                             }),
                              m_visibleTodos.end());
-        m_navigation.SetCount(m_visibleTodos.size());
+        std::sort(m_visibleTodos.begin(), m_visibleTodos.end(), [](const auto& left, const auto& right) {
+            const int leftState = TodoService::StateSortKey(left.state);
+            const int rightState = TodoService::StateSortKey(right.state);
+            if (leftState != rightState)
+            {
+                return leftState < rightState;
+            }
+            const int leftPriority = TodoService::PrioritySortKey(left.priority);
+            const int rightPriority = TodoService::PrioritySortKey(right.priority);
+            if (leftPriority != rightPriority)
+            {
+                return leftPriority > rightPriority;
+            }
+            return left.title < right.title;
+        });
 
-        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoState))
-        {
-            m_stateFilter = (m_stateFilter + 1) % 5;
-            m_navigation.Reset();
-        }
-        if (allowInput && shortcuts->Pressed(ShortcutAction::BrowserFilter))
-        {
-            m_focusSearch = true;
-        }
+        const std::size_t pinnedRows = 1;
+        m_navigation.SetCount(m_visibleTodos.size() + pinnedRows);
+
         if (allowInput && shortcuts->Pressed(ShortcutAction::NavigateDown, true))
         {
             m_navigation.MoveNext();
@@ -289,29 +317,29 @@ namespace Software::Slate
             }
             return;
         }
-        if (allowInput && shortcuts->Pressed(ShortcutAction::Accept) &&
-            m_navigation.HasSelection() && !m_visibleTodos.empty())
+        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoOpen) &&
+            m_navigation.HasSelection())
         {
-            BeginEdit(m_visibleTodos[m_navigation.Selected()]);
+            OpenSelected(context, callbacks);
+            return;
+        }
+        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoEdit) &&
+            m_navigation.HasSelection())
+        {
+            if (m_navigation.Selected() == 0)
+            {
+                BeginCreate(context, false);
+            }
+            else if (!m_visibleTodos.empty())
+            {
+                BeginEdit(m_visibleTodos[m_navigation.Selected() - 1]);
+            }
             return;
         }
         if (allowInput && shortcuts->Pressed(ShortcutAction::TodoDelete) &&
-            m_navigation.HasSelection() && !m_visibleTodos.empty())
+            m_navigation.HasSelection() && m_navigation.Selected() > 0 && !m_visibleTodos.empty())
         {
             DeleteSelected(context, callbacks);
-            return;
-        }
-        if (allowInput && shortcuts->Pressed(ShortcutAction::TodoOpen) && m_navigation.HasSelection() && !m_visibleTodos.empty())
-        {
-            const auto todo = m_visibleTodos[m_navigation.Selected()];
-            m_listOpen = false;
-            if (callbacks.openDocument && callbacks.openDocument(todo.relativePath))
-            {
-                if (auto* editor = EditorContext(context))
-                {
-                    editor->JumpToLine(todo.line);
-                }
-            }
             return;
         }
 
@@ -330,18 +358,58 @@ namespace Software::Slate
         ImGui::TextColored(Amber, "todos");
         ImGui::SameLine();
         ImGui::TextColored(TodoFilterColor(m_stateFilter), "%s", TodoFilterLabel(m_stateFilter));
-        ImGui::SetNextItemWidth(-1.0f);
-        if (allowInput && m_focusSearch)
-        {
-            ImGui::SetKeyboardFocusHere();
-            m_focusSearch = false;
-        }
-        InputTextString("##TodoSearch", m_searchBuffer, allowInput ? 0 : ImGuiInputTextFlags_ReadOnly);
+        ImGui::Dummy(ImVec2(1.0f, 8.0f));
         ImGui::Separator();
+
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float rowHeight = ImGui::GetTextLineHeightWithSpacing() + 6.0f;
+        const float rowRadius = 6.0f;
+        const float rowInsetX = 4.0f;
+        const ImU32 selectedRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, 0.14f));
+        const ImU32 hoveredRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.08f));
+
+        auto drawSelectionBackground = [&](const ImVec2& rowStart, float rowWidth, bool selected, bool hovered)
+        {
+            if (selected || hovered)
+            {
+                drawList->AddRectFilled(ImVec2(rowStart.x + rowInsetX, rowStart.y + 1.0f),
+                                        ImVec2(rowStart.x + rowWidth - rowInsetX, rowStart.y + rowHeight - 1.0f),
+                                        selected ? selectedRowColor : hoveredRowColor,
+                                        rowRadius);
+            }
+        };
+
+        {
+            const bool selected = m_navigation.Selected() == 0;
+            ImVec2 rowStart = ImGui::GetCursorScreenPos();
+            const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+            ImGui::PushID("TodoNewPinnedRow");
+            ImGui::InvisibleButton("##TodoNewRow", ImVec2(rowWidth, rowHeight));
+            const bool hovered = ImGui::IsItemHovered();
+            if (allowInput && ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
+                m_navigation.SetSelected(0);
+            }
+            if (allowInput && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                m_navigation.SetSelected(0);
+                BeginCreate(context, false);
+                ImGui::PopID();
+                return;
+            }
+            ImGui::PopID();
+
+            drawSelectionBackground(rowStart, rowWidth, selected, hovered);
+            const float y = rowStart.y + 4.0f;
+            drawList->AddText(ImVec2(rowStart.x + 18.0f, y),
+                              ImGui::ColorConvertFloat4ToU32(selected ? Green : Amber),
+                              "+ new todo");
+        }
 
         if (m_visibleTodos.empty())
         {
-            ImGui::TextColored(Muted, "no todos found");
+            ImGui::Dummy(ImVec2(1.0f, 6.0f));
+            ImGui::TextColored(Muted, "no todo files yet");
         }
         else
         {
@@ -351,6 +419,7 @@ namespace Software::Slate
             {
                 const auto& todo = m_visibleTodos[i];
                 const ImVec4& stateColor = TodoStateColor(todo.state);
+                const ImVec4& priorityColor = TodoPriorityColor(todo.priority);
                 if (m_stateFilter == 0 && (!groupStarted || todo.state != currentGroup))
                 {
                     if (groupStarted)
@@ -363,16 +432,34 @@ namespace Software::Slate
                     ImGui::Separator();
                 }
 
-                const bool selected = i == m_navigation.Selected();
-                ImGui::TextColored(selected ? Green : Primary, "%s %s", selected ? ">" : " ", todo.title.c_str());
-                ImGui::SameLine();
-                ImGui::TextColored(stateColor, "[%s]", MarkdownService::TodoStateLabel(todo.state));
-                ImGui::SameLine();
-                ImGui::TextColored(Muted, "%s:%zu", todo.relativePath.generic_string().c_str(), todo.line);
-                if (!todo.description.empty())
+                const std::size_t rowIndex = i + 1;
+                const bool selected = rowIndex == m_navigation.Selected();
+                ImVec2 rowStart = ImGui::GetCursorScreenPos();
+                const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+                ImGui::PushID(static_cast<int>(rowIndex));
+                ImGui::InvisibleButton("##TodoRow", ImVec2(rowWidth, rowHeight));
+                const bool hovered = ImGui::IsItemHovered();
+                if (allowInput && ImGui::IsItemClicked(ImGuiMouseButton_Left))
                 {
-                    ImGui::TextColored(Muted, "    %s", todo.description.c_str());
+                    m_navigation.SetSelected(rowIndex);
                 }
+                if (allowInput && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    m_navigation.SetSelected(rowIndex);
+                    OpenSelected(context, callbacks);
+                    ImGui::PopID();
+                    return;
+                }
+                ImGui::PopID();
+
+                drawSelectionBackground(rowStart, rowWidth, selected, hovered);
+
+                const float titleX = rowStart.x + 18.0f;
+                const float metaX = rowStart.x + rowWidth - 170.0f;
+                const float y = rowStart.y + 4.0f;
+                drawList->AddText(ImVec2(titleX, y), ImGui::ColorConvertFloat4ToU32(selected ? Green : Primary), todo.title.c_str());
+                drawList->AddText(ImVec2(metaX, y), ImGui::ColorConvertFloat4ToU32(stateColor), MarkdownService::TodoStateLabel(todo.state));
+                drawList->AddText(ImVec2(metaX + 88.0f, y), ImGui::ColorConvertFloat4ToU32(priorityColor), TodoService::PriorityLabel(todo.priority));
             }
         }
 
@@ -401,8 +488,14 @@ namespace Software::Slate
             return;
         }
 
-        const ImVec2 size(std::min(620.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.52f)),
-                          std::min(220.0f, std::max(176.0f, ImGui::GetWindowHeight() * 0.24f)));
+        const std::string helperText = HelperText(*shortcuts);
+        const float helperWidth = ImGui::CalcTextSize(helperText.c_str()).x;
+        const float maxWidth = std::max(360.0f, ImGui::GetWindowWidth() - 96.0f);
+        const float desiredWidth = std::max({620.0f, helperWidth + 52.0f, ImGui::GetWindowWidth() * 0.52f});
+        const float formWidth = std::min(maxWidth, desiredWidth);
+        const float desiredHeight = 292.0f;
+        const float formHeight = std::min(std::max(236.0f, desiredHeight), std::max(220.0f, ImGui::GetWindowHeight() - 96.0f));
+        const ImVec2 size(formWidth, formHeight);
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
@@ -422,7 +515,21 @@ namespace Software::Slate
         ImGui::TextColored(TodoStateColor(m_form.state),
                            "[%s]",
                            MarkdownService::TodoStateLabel(m_form.state));
+        ImGui::SameLine();
+        ImGui::TextColored(TodoPriorityColor(m_form.priority),
+                           "[%s]",
+                           TodoService::PriorityLabel(m_form.priority));
         ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
+
+        const bool upPressed = ImGui::IsKeyPressed(ImGuiKey_UpArrow, true);
+        const bool downPressed = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true);
+
+        // Move focus before drawing the title so description -> title happens immediately.
+        if (m_form.focusField == TodoFormFocusField::Description && upPressed)
+        {
+            m_form.focusField = TodoFormFocusField::Title;
+            m_form.requestTextFocus = true;
+        }
 
         ImGui::SetNextItemWidth(-1.0f);
         if (m_form.requestTextFocus && m_form.focusField == TodoFormFocusField::Title)
@@ -443,13 +550,27 @@ namespace Software::Slate
             m_form.requestTextFocus = false;
         }
 
+        // Move focus before drawing the description so title -> description happens in the same frame.
+        if ((titleActive || titleFocused || m_form.focusField == TodoFormFocusField::Title) && downPressed)
+        {
+            m_form.focusField = TodoFormFocusField::Description;
+            m_form.requestTextFocus = true;
+        }
+
         ImGui::SetNextItemWidth(-1.0f);
         if (m_form.requestTextFocus && m_form.focusField == TodoFormFocusField::Description)
         {
             ImGui::SetKeyboardFocusHere();
         }
-        const auto descriptionResult =
-            InputTextString("##TodoDescription", m_form.description, ImGuiInputTextFlags_EnterReturnsTrue);
+        const float descriptionHeight = std::max(86.0f, size.y - 154.0f);
+        auto descriptionResult =
+            InputTextMultilineString("##TodoDescription",
+                                     m_form.description,
+                                     ImVec2(-1.0f, descriptionHeight),
+                                     0,
+                                     &m_form.descriptionCursor,
+                                     m_form.requestedDescriptionCursor);
+        m_form.requestedDescriptionCursor = -1;
         const bool descriptionActive = ImGui::IsItemActive();
         const bool descriptionFocused = ImGui::IsItemFocused();
         if (descriptionActive || descriptionFocused || ImGui::IsItemClicked())
@@ -461,11 +582,10 @@ namespace Software::Slate
         {
             m_form.requestTextFocus = false;
         }
-
         const bool textInputActive = titleActive || descriptionActive || titleFocused || descriptionFocused;
         ImGui::PopItemFlag();
         ImGui::Separator();
-        DrawShortcutText(HelperText(*shortcuts), Amber, Primary);
+        DrawShortcutText(helperText, Amber, Primary);
         ImGui::EndChild();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
@@ -479,6 +599,10 @@ namespace Software::Slate
         {
             m_form.state = MarkdownService::NextTodoState(m_form.state);
         }
+        if (shortcuts->Pressed(ShortcutAction::TodoPriority))
+        {
+            m_form.priority = TodoService::NextPriority(m_form.priority);
+        }
         if (shortcuts->Pressed(ShortcutAction::Cancel))
         {
             CancelForm(context, callbacks);
@@ -489,7 +613,15 @@ namespace Software::Slate
             CancelForm(context, callbacks);
             return;
         }
-        if (titleResult.submitted || descriptionResult.submitted)
+
+        if (titleResult.submitted)
+        {
+            m_form.focusField = TodoFormFocusField::Description;
+            m_form.requestTextFocus = true;
+            return;
+        }
+
+        if (shortcuts->Pressed(ShortcutAction::EditorSave))
         {
             AcceptForm(context, callbacks);
             return;
@@ -542,18 +674,37 @@ namespace Software::Slate
             return false;
         }
         const std::size_t removeIndex = std::min(m_form.pendingCommandLine - 1, lines.size() - 1);
-        if (!IsSlashCommand(lines[removeIndex]))
+        std::string query;
+        std::size_t tokenStart = 0;
+        std::size_t tokenEnd = 0;
+        const bool hasTodoToken =
+            SlashCommandService::QueryFromLine(lines[removeIndex], &query, &tokenStart, &tokenEnd) && query == "todo";
+        const bool wholeLineTodoCommand = IsSlashCommand(lines[removeIndex]);
+        if (!hasTodoToken && !wholeLineTodoCommand)
         {
             return false;
         }
 
-        if (lines.size() == 1)
+        std::string remainingLine;
+        if (hasTodoToken)
         {
-            lines.front().clear();
+            remainingLine = lines[removeIndex].substr(0, tokenStart) + lines[removeIndex].substr(tokenEnd);
+        }
+
+        if (PathUtils::Trim(remainingLine).empty())
+        {
+            if (lines.size() == 1)
+            {
+                lines.front().clear();
+            }
+            else
+            {
+                lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(removeIndex));
+            }
         }
         else
         {
-            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(removeIndex));
+            lines[removeIndex] = std::move(remainingLine);
         }
 
         std::string updatedText;
@@ -575,73 +726,6 @@ namespace Software::Slate
         return true;
     }
 
-    bool SlateTodoOverlayController::ReplacePendingCommand(Software::Core::Runtime::AppContext& context,
-                                                           const std::string& block)
-    {
-        auto* workspace = WorkspaceContext(context);
-        auto* editor = EditorContext(context);
-        if (!workspace || !editor)
-        {
-            return false;
-        }
-
-        auto& documents = workspace->Documents();
-        auto* active = documents.Active();
-        if (!active || m_form.pendingCommandLine == 0)
-        {
-            return false;
-        }
-
-        if (!m_form.pendingCommandPath.empty() &&
-            PathUtils::NormalizeRelative(active->relativePath) != m_form.pendingCommandPath)
-        {
-            return false;
-        }
-
-        const std::string lineEnding = active->lineEnding.empty()
-                                           ? PathUtils::DetectLineEnding(active->text)
-                                           : active->lineEnding;
-        auto lines = MarkdownService::SplitLines(active->text);
-        if (lines.empty())
-        {
-            return false;
-        }
-
-        std::size_t replaceIndex = std::min(m_form.pendingCommandLine - 1, lines.size());
-
-        auto replacement = MarkdownService::SplitLines(block);
-        if (replacement.empty())
-        {
-            replacement.emplace_back();
-        }
-
-        if (replaceIndex < lines.size())
-        {
-            const std::string trimmedLine = PathUtils::Trim(lines[replaceIndex]);
-            if (IsSlashCommand(trimmedLine) || (lines.size() == 1 && trimmedLine.empty()))
-            {
-                lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex));
-            }
-        }
-        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(replaceIndex), replacement.begin(), replacement.end());
-
-        std::string updatedText;
-        for (std::size_t i = 0; i < lines.size(); ++i)
-        {
-            if (i > 0)
-            {
-                updatedText += lineEnding;
-            }
-            updatedText += lines[i];
-        }
-
-        active->text = std::move(updatedText);
-        documents.MarkEdited(context.frame.elapsedSeconds);
-        editor->LoadFromActiveDocument(documents);
-        editor->JumpToLine(replaceIndex + 1);
-        return true;
-    }
-
     bool SlateTodoOverlayController::AcceptForm(Software::Core::Runtime::AppContext& context,
                                                 const TodoOverlayCallbacks& callbacks)
     {
@@ -660,30 +744,35 @@ namespace Software::Slate
 
         if (m_form.mode == TodoFormMode::Create)
         {
-            const std::string block = MarkdownService::FormatTodoBlock(
-                state, title, description, workspace->Documents().Active()
-                                               ? workspace->Documents().Active()->lineEnding
-                                               : "\n");
-            bool inserted = false;
-            if (m_form.replaceActiveLine)
+            const auto todoService = context.services.Resolve<TodoService>();
+            if (!todoService)
             {
-                inserted = ReplacePendingCommand(context, block);
-            }
-            else
-            {
-                editor->InsertTextAtCursor(workspace->Documents(), block, context.frame.elapsedSeconds);
-                inserted = true;
-            }
-
-            if (!inserted)
-            {
-                SetError(callbacks, "could not insert todo");
+                SetError(callbacks, "todo service unavailable");
                 return false;
             }
 
-            workspace->Workspace().Scan(nullptr);
-            workspace->Search().Rebuild(workspace->Workspace());
-            SetStatus(callbacks, "todo created");
+            TodoMutationResult result;
+            if (!todoService->CreateTodo(*workspace,
+                                         state,
+                                         title,
+                                         description,
+                                         context.frame.elapsedSeconds,
+                                         &result,
+                                         m_form.priority))
+            {
+                SetError(callbacks, result.error.empty() ? "could not create todo file" : result.error);
+                return false;
+            }
+
+            if (callbacks.openDocument)
+            {
+                callbacks.openDocument(result.relativePath);
+            }
+            if (auto* activeEditor = EditorContext(context))
+            {
+                activeEditor->JumpToLine(result.revealLine);
+            }
+            SetStatus(callbacks, "todo file created");
         }
         else
         {
@@ -702,7 +791,8 @@ namespace Software::Slate
                                           title,
                                           description,
                                           context.frame.elapsedSeconds,
-                                          &result))
+                                          &result,
+                                          m_form.priority))
             {
                 SetError(callbacks, result.error.empty() ? "could not update todo" : result.error);
                 return false;
@@ -712,7 +802,6 @@ namespace Software::Slate
         }
 
         m_form = {};
-        m_focusSearch = false;
         if (!m_listOpen && callbacks.restoreEditorFocus)
         {
             callbacks.restoreEditorFocus();
@@ -720,10 +809,43 @@ namespace Software::Slate
         return true;
     }
 
+    bool SlateTodoOverlayController::OpenSelected(Software::Core::Runtime::AppContext& context,
+                                                    const TodoOverlayCallbacks& callbacks)
+    {
+        if (!m_navigation.HasSelection())
+        {
+            return false;
+        }
+
+        if (m_navigation.Selected() == 0)
+        {
+            BeginCreate(context, false);
+            return true;
+        }
+
+        const std::size_t todoIndex = m_navigation.Selected() - 1;
+        if (todoIndex >= m_visibleTodos.size())
+        {
+            return false;
+        }
+
+        const auto todo = m_visibleTodos[todoIndex];
+        m_listOpen = false;
+        if (callbacks.openDocument && callbacks.openDocument(todo.relativePath))
+        {
+            if (auto* editor = EditorContext(context))
+            {
+                editor->JumpToLine(todo.line);
+            }
+            return true;
+        }
+        return false;
+    }
+
     bool SlateTodoOverlayController::DeleteSelected(Software::Core::Runtime::AppContext& context,
                                                       const TodoOverlayCallbacks& callbacks)
     {
-        if (!m_navigation.HasSelection() || m_visibleTodos.empty())
+        if (!m_navigation.HasSelection() || m_navigation.Selected() == 0 || m_visibleTodos.empty())
         {
             return false;
         }
@@ -737,7 +859,12 @@ namespace Software::Slate
         }
 
         TodoMutationResult result;
-        const auto todo = m_visibleTodos[m_navigation.Selected()];
+        const std::size_t todoIndex = m_navigation.Selected() - 1;
+        if (todoIndex >= m_visibleTodos.size())
+        {
+            return false;
+        }
+        const auto todo = m_visibleTodos[todoIndex];
         if (!todoService->DeleteTodo(*workspace, todo, context.frame.elapsedSeconds, &result))
         {
             SetError(callbacks, result.error.empty() ? "could not delete todo" : result.error);
@@ -748,7 +875,7 @@ namespace Software::Slate
         SetStatus(callbacks, "todo deleted");
         if (!m_visibleTodos.empty())
         {
-            m_navigation.SetSelected(std::min(m_navigation.Selected(), m_visibleTodos.size() - 1));
+            m_navigation.SetSelected(std::min(m_navigation.Selected(), m_visibleTodos.size()));
         }
         return true;
     }

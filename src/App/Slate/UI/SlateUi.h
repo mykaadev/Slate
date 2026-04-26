@@ -70,7 +70,8 @@ namespace Software::Slate::UI
                                     int* cursorPos = nullptr, int requestedCursorPos = -1);
     // Draws a multiline text input backed by std string
     TextInputResult InputTextMultilineString(const char* label, std::string& text, const ImVec2& size,
-                                             ImGuiInputTextFlags flags, int* cursorPos = nullptr);
+                                             ImGuiInputTextFlags flags, int* cursorPos = nullptr,
+                                             int requestedCursorPos = -1);
     // Returns a centered width with bounds
     float CenteredColumnWidth(float maxWidth = 760.0f, float minMargin = 0.0f);
     // Moves the cursor so the next item is centered

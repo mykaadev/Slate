@@ -128,3 +128,7 @@ Do not add new todo UI state or markdown mutation behavior back to `SlateModeBas
 ## Shortcut ownership
 
 Keyboard bindings are owned by `Slate.Input` / `ShortcutService`. New modules should register or consume stable shortcut actions instead of hardcoding display text like `(ctrl+s)` or direct key checks. Defaults live in `src/App/Slate/Input/ShortcutService.cpp`; user overrides are written to `config/input/shortcuts.tsv` by the settings/config screen. Shortcut editing uses an input-capture modal rather than cycling hardcoded choices.
+
+## Todo document ownership
+
+Todos are owned by `Slate.Todos` and stored as standalone Markdown documents under the workspace `Todos/` folder. The todo overlay creates, updates, deletes, opens, and filters todo documents through `TodoService`; it should not write `#todo` blocks into arbitrary notes. Legacy inline todo parsing remains only as Markdown compatibility for old files and rendering.

@@ -4,6 +4,7 @@
 #include "App/Slate/Editor/ScintillaEditorHost.h"
 
 #include <functional>
+#include <algorithm>
 
 namespace Software::Slate
 {
@@ -177,6 +178,36 @@ namespace Software::Slate
         return true;
     }
 
+    bool SlateEditorContext::ActiveLineTextAndCaret(std::string* text, std::size_t* caretColumn) const
+    {
+        if (!text)
+        {
+            return false;
+        }
+
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            return m_nativeEditor->CurrentLineTextAndCaret(text, caretColumn);
+        }
+
+        *text = m_editor.ActiveLineText();
+        if (caretColumn)
+        {
+            *caretColumn = std::min<std::size_t>(static_cast<std::size_t>(std::max(0, m_editor.CaretColumn())), text->size());
+        }
+        return true;
+    }
+
+    bool SlateEditorContext::HasSelection() const
+    {
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            return m_nativeEditor->HasSelection();
+        }
+
+        return false;
+    }
+
     bool SlateEditorContext::ReplaceActiveLineWithText(DocumentService& documents,
                                                        const std::string& text,
                                                        double elapsedSeconds)
@@ -261,7 +292,8 @@ namespace Software::Slate
     }
 
     int SlateEditorContext::ProcessDroppedFiles(std::vector<std::string>* droppedFiles, DocumentService& documents,
-                                                AssetService& assets, double elapsedSeconds, std::string* error)
+                                                AssetService& assets, ImageStoragePolicy imageStoragePolicy,
+                                                double elapsedSeconds, std::string* error)
     {
         std::vector<std::string> pendingDrops;
         if (droppedFiles && !droppedFiles->empty())
@@ -292,14 +324,12 @@ namespace Software::Slate
         std::string lastError;
         for (const auto& pathText : pendingDrops)
         {
-            fs::path assetRelative;
+            std::string markdown;
             std::string itemError;
-            if (assets.CopyImageAsset(document->relativePath, pathText, &assetRelative, &itemError))
+            if (assets.CreateMarkdownImageFromFile(document->relativePath, pathText, imageStoragePolicy, &markdown,
+                                                   &itemError))
             {
-                InsertTextAtCursor(documents,
-                                   AssetService::MarkdownImageLink(document->relativePath, assetRelative) +
-                                       document->lineEnding,
-                                   elapsedSeconds);
+                InsertTextAtCursor(documents, markdown + document->lineEnding, elapsedSeconds);
                 ++inserted;
             }
             else
@@ -391,6 +421,22 @@ namespace Software::Slate
     bool SlateEditorContext::ConsumeNativeCommand(NativeEditorCommand command)
     {
         return m_nativeEditor && m_nativeEditor->ConsumeCommand(command);
+    }
+
+    void SlateEditorContext::ShowNativeSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->ShowSlashCommandPalette(commands, selectedIndex);
+        }
+    }
+
+    void SlateEditorContext::HideNativeSlashCommandPalette()
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->HideSlashCommandPalette();
+        }
     }
 
     void SlateEditorContext::ReleaseNativeEditorFocus()

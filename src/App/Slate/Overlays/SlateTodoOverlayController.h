@@ -64,10 +64,10 @@ namespace Software::Slate
         /** Selects whether the form creates a new todo or edits an existing one. */
         enum class TodoFormMode
         {
-            /** Form inserts a new todo block. */
+            /** Form creates a new todo Markdown document. */
             Create,
 
-            /** Form rewrites an existing todo block. */
+            /** Form updates an existing todo Markdown document. */
             Edit
         };
 
@@ -111,11 +111,20 @@ namespace Software::Slate
             /** Todo state selected by the form. */
             TodoState state = TodoState::Open;
 
+            /** Todo priority selected by the form. */
+            TodoPriority priority = TodoPriority::Normal;
+
             /** User-editable todo title. */
             std::string title;
 
             /** User-editable todo description. */
             std::string description;
+
+            /** Current cursor position inside the multiline description field. */
+            int descriptionCursor = 0;
+
+            /** Requested cursor position for the description field after synthetic edits. */
+            int requestedDescriptionCursor = -1;
         };
 
         /** Opens the form for an existing todo ticket. */
@@ -130,17 +139,17 @@ namespace Software::Slate
         /** Cancels the form and restores focus when appropriate. */
         void CancelForm(Software::Core::Runtime::AppContext& context, const TodoOverlayCallbacks& callbacks);
 
-        /** Saves the form into the active document or a backing file. */
+        /** Saves the form into a standalone todo Markdown document. */
         bool AcceptForm(Software::Core::Runtime::AppContext& context, const TodoOverlayCallbacks& callbacks);
+
+        /** Opens the selected todo document from the list. */
+        bool OpenSelected(Software::Core::Runtime::AppContext& context, const TodoOverlayCallbacks& callbacks);
 
         /** Deletes the selected visible todo from the list. */
         bool DeleteSelected(Software::Core::Runtime::AppContext& context, const TodoOverlayCallbacks& callbacks);
 
         /** Removes a pending /todo command line before opening the form. */
         bool RemovePendingCommand(Software::Core::Runtime::AppContext& context);
-
-        /** Replaces a pending /todo command line with a formatted todo block. */
-        bool ReplacePendingCommand(Software::Core::Runtime::AppContext& context, const std::string& block);
 
         /** Reloads and reveals editor content after a todo service mutation. */
         void RefreshEditorAfterMutation(Software::Core::Runtime::AppContext& context,
@@ -152,17 +161,11 @@ namespace Software::Slate
         /** Filtered todos currently shown by the list overlay. */
         std::vector<TodoTicket> m_visibleTodos;
 
-        /** Search query applied to todo titles, descriptions, paths, states, and tags. */
-        std::string m_searchBuffer;
-
         /** Create/edit form state. */
         TodoFormState m_form;
 
         /** True while the list overlay is visible. */
         bool m_listOpen = false;
-
-        /** True when the list search input should receive focus. */
-        bool m_focusSearch = false;
 
         /** Current state filter index, where zero means all states. */
         int m_stateFilter = 0;

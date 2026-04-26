@@ -1,5 +1,6 @@
 #include "App/Slate/Editor/ScintillaEditorHost.h"
 
+#include "App/Slate/Editor/SlashCommandService.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #if defined(_WIN32)
@@ -19,6 +20,7 @@ extern const Lexilla::LexerModule lmMarkdown;
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <sstream>
 #include <string_view>
 #include <utility>
 
@@ -46,19 +48,6 @@ namespace Software::Slate
             }
 
             return text.substr(start, end - start);
-        }
-
-        bool IsTodoSlashCommand(std::string_view text)
-        {
-            text = TrimWhitespace(text);
-            if (text.size() != 5 || text[0] != '/')
-            {
-                return false;
-            }
-            return static_cast<char>(std::tolower(static_cast<unsigned char>(text[1]))) == 't' &&
-                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[2]))) == 'o' &&
-                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[3]))) == 'd' &&
-                   static_cast<char>(std::tolower(static_cast<unsigned char>(text[4]))) == 'o';
         }
 
         std::string StripLineEnding(std::string text)
@@ -217,7 +206,7 @@ namespace Software::Slate
 
         std::uint32_t BlendByte(float value)
         {
-            return static_cast<std::uint32_t>(std::clamp(std::lround(value * 255.0f), 0l, 255l));
+            return static_cast<std::uint32_t>(std::clamp<int>(std::lround(value * 255.0f), 0l, 255l));
         }
 
 #if defined(_WIN32)
@@ -252,10 +241,11 @@ namespace Software::Slate
 
         int PixelFontSizeToScintillaPoints(float pixelSize)
         {
-            return static_cast<int>(std::clamp(std::lround(pixelSize * 72.0f / 96.0f), 7l, 32l));
+            return static_cast<int>(std::clamp<int>(std::lround(pixelSize * 72.0f / 96.0f), 7l, 32l));
         }
 
         constexpr wchar_t HostPropertyName[] = L"SlateScintillaHost";
+        constexpr wchar_t SlashPaletteClassName[] = L"SlateSlashCommandPalette";
 #endif
     }
 
@@ -304,6 +294,10 @@ namespace Software::Slate
             return;
         }
 
+        if (!visible)
+        {
+            HideSlashCommandPalette();
+        }
         if (!visible && ::GetFocus() == static_cast<HWND>(m_editorWindow) && m_parentWindow)
         {
             ::SetFocus(static_cast<HWND>(m_parentWindow));
@@ -324,6 +318,7 @@ namespace Software::Slate
             return;
         }
 
+        HideSlashCommandPalette();
         SetText("");
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_EMPTYUNDOBUFFER, 0, 0);
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_SETSAVEPOINT, 0, 0);
@@ -544,6 +539,75 @@ namespace Software::Slate
 #endif
     }
 
+    bool ScintillaEditorHost::CurrentLineTextAndCaret(std::string* text, std::size_t* caretColumn) const
+    {
+#if defined(_WIN32)
+        if (!text || !m_editorWindow)
+        {
+            return false;
+        }
+
+        const auto call = [this](unsigned int message, uintptr_t wParam = 0, intptr_t lParam = 0) {
+            return ::SendMessageW(static_cast<HWND>(m_editorWindow), message, static_cast<WPARAM>(wParam),
+                                  static_cast<LPARAM>(lParam));
+        };
+        const auto currentPosition = static_cast<sptr_t>(call(SCI_GETCURRENTPOS, 0, 0));
+        const auto lineIndex = static_cast<sptr_t>(call(SCI_LINEFROMPOSITION,
+                                                        static_cast<uintptr_t>(currentPosition), 0));
+        const auto lineStart = static_cast<sptr_t>(call(SCI_POSITIONFROMLINE,
+                                                        static_cast<uintptr_t>(lineIndex), 0));
+        const auto lineLength = static_cast<sptr_t>(call(SCI_LINELENGTH, static_cast<uintptr_t>(lineIndex), 0));
+        if (lineLength <= 0)
+        {
+            text->clear();
+            if (caretColumn)
+            {
+                *caretColumn = 0;
+            }
+            return true;
+        }
+
+        std::string lineText(static_cast<std::size_t>(lineLength) + 1, '\0');
+        call(SCI_GETLINE, static_cast<uintptr_t>(lineIndex), reinterpret_cast<intptr_t>(lineText.data()));
+        *text = StripLineEnding(std::move(lineText));
+
+        if (caretColumn)
+        {
+            const auto rawColumn = std::max<sptr_t>(0, currentPosition - lineStart);
+            *caretColumn = std::min<std::size_t>(static_cast<std::size_t>(rawColumn), text->size());
+        }
+        return true;
+#else
+        if (text)
+        {
+            text->clear();
+        }
+        if (caretColumn)
+        {
+            *caretColumn = 0;
+        }
+        return false;
+#endif
+    }
+
+    bool ScintillaEditorHost::HasSelection() const
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return false;
+        }
+
+        const auto currentPosition =
+            static_cast<sptr_t>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETCURRENTPOS, 0, 0));
+        const auto anchorPosition =
+            static_cast<sptr_t>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETANCHOR, 0, 0));
+        return currentPosition != anchorPosition;
+#else
+        return false;
+#endif
+    }
+
     bool ScintillaEditorHost::ReplaceCurrentLine(const std::string& text)
     {
 #if defined(_WIN32)
@@ -638,6 +702,296 @@ namespace Software::Slate
         (void)line;
 #endif
     }
+
+
+    void ScintillaEditorHost::ShowSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow || commands.empty())
+        {
+            HideSlashCommandPalette();
+            return;
+        }
+
+        m_slashPaletteInputSuppressed = false;
+        m_slashPaletteSuppressedQuery.clear();
+
+        const int clampedIndex = std::clamp<int>(selectedIndex, 0, static_cast<int>(commands.size()) - 1);
+        const auto currentPosition = static_cast<sptr_t>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_GETCURRENTPOS, 0, 0));
+        const bool contentChanged = commands.size() != m_slashPaletteCommands.size() ||
+                                    !std::equal(commands.begin(), commands.end(), m_slashPaletteCommands.begin(),
+                                                [](const SlashCommandDefinition& lhs, const SlashCommandDefinition& rhs) {
+                                                    return lhs.id == rhs.id && lhs.description == rhs.description && lhs.kind == rhs.kind;
+                                                });
+
+        if (!m_slashPaletteVisible || contentChanged || m_slashPaletteSelectedIndex != clampedIndex ||
+            m_slashPalettePosition != static_cast<std::intptr_t>(currentPosition))
+        {
+            m_slashPaletteCommands = commands;
+            m_slashPaletteSelectedIndex = clampedIndex;
+            m_slashPalettePosition = static_cast<std::intptr_t>(currentPosition);
+            UpdateSlashPaletteWindow();
+        }
+#else
+        (void)commands;
+        (void)selectedIndex;
+#endif
+    }
+
+    void ScintillaEditorHost::HideSlashCommandPalette()
+    {
+#if defined(_WIN32)
+        if (m_slashPaletteWindow)
+        {
+            ::ShowWindow(static_cast<HWND>(m_slashPaletteWindow), SW_HIDE);
+        }
+#endif
+        m_slashPaletteVisible = false;
+        m_slashPaletteCommands.clear();
+        m_slashPaletteSelectedIndex = -1;
+        m_slashPaletteScrollOffset = 0;
+        m_suppressNextTabCharacter = false;
+        m_slashPalettePosition = -1;
+    }
+
+#if defined(_WIN32)
+    bool ScintillaEditorHost::EnsureSlashPaletteWindow()
+    {
+        if (m_slashPaletteWindow)
+        {
+            return true;
+        }
+        if (!m_parentWindow)
+        {
+            return false;
+        }
+
+        static bool registered = false;
+        if (!registered)
+        {
+            WNDCLASSEXW wc{};
+            wc.cbSize = sizeof(WNDCLASSEXW);
+            wc.lpfnWndProc = reinterpret_cast<WNDPROC>(&ScintillaEditorHost::SlashPaletteWindowProc);
+            wc.hInstance = ::GetModuleHandleW(nullptr);
+            wc.hCursor = ::LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+            wc.hbrBackground = nullptr;
+            wc.lpszClassName = SlashPaletteClassName;
+            registered = ::RegisterClassExW(&wc) != 0 || ::GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+        }
+        if (!registered)
+        {
+            return false;
+        }
+
+        HWND window = ::CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                                        SlashPaletteClassName,
+                                        L"",
+                                        WS_POPUP | WS_CLIPSIBLINGS,
+                                        0, 0, 1, 1,
+                                        static_cast<HWND>(m_parentWindow),
+                                        nullptr,
+                                        ::GetModuleHandleW(nullptr),
+                                        this);
+        if (!window)
+        {
+            return false;
+        }
+
+        m_slashPaletteWindow = window;
+        return true;
+    }
+
+    void ScintillaEditorHost::UpdateSlashPaletteWindow()
+    {
+        if (!m_editorWindow || m_slashPaletteCommands.empty() || !EnsureSlashPaletteWindow())
+        {
+            HideSlashCommandPalette();
+            return;
+        }
+
+        const std::size_t maxVisibleCount = 7;
+        const std::size_t visibleCount = std::min<std::size_t>(m_slashPaletteCommands.size(), maxVisibleCount);
+        const int width = 360;
+        const int headerHeight = 24;
+        const int rowHeight = 23;
+        const int padding = 6;
+        const int height = headerHeight + static_cast<int>(visibleCount) * rowHeight + padding;
+
+        const int maxScrollOffset = std::max(0, static_cast<int>(m_slashPaletteCommands.size()) - static_cast<int>(visibleCount));
+        if (m_slashPaletteSelectedIndex < m_slashPaletteScrollOffset)
+        {
+            m_slashPaletteScrollOffset = m_slashPaletteSelectedIndex;
+        }
+        else if (m_slashPaletteSelectedIndex >= m_slashPaletteScrollOffset + static_cast<int>(visibleCount))
+        {
+            m_slashPaletteScrollOffset = m_slashPaletteSelectedIndex - static_cast<int>(visibleCount) + 1;
+        }
+        m_slashPaletteScrollOffset = std::clamp<int>(m_slashPaletteScrollOffset, 0, maxScrollOffset);
+
+        const auto position = static_cast<sptr_t>(m_slashPalettePosition);
+        const int caretX = static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_POINTXFROMPOSITION, 0, position));
+        const int caretY = static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_POINTYFROMPOSITION, 0, position));
+        const int lineHeight = static_cast<int>(::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_TEXTHEIGHT, 0, 0));
+
+        POINT screenPoint{caretX, caretY + lineHeight + 6};
+        ::ClientToScreen(static_cast<HWND>(m_editorWindow), &screenPoint);
+
+        RECT editorRect{};
+        ::GetWindowRect(static_cast<HWND>(m_editorWindow), &editorRect);
+        const int editorLeft = static_cast<int>(editorRect.left);
+        const int editorTop = static_cast<int>(editorRect.top);
+        const int editorRight = static_cast<int>(editorRect.right);
+        const int editorBottom = static_cast<int>(editorRect.bottom);
+        const int minX = editorLeft + 12;
+        const int maxX = std::max(minX, editorRight - width - 12);
+        int x = std::clamp<int>(screenPoint.x - 14, minX, maxX);
+        int y = screenPoint.y;
+        if (y + height > editorBottom - 8)
+        {
+            y = editorTop + caretY - height - 8;
+        }
+        y = std::max(editorTop + 8, y);
+
+        ::SetWindowPos(static_cast<HWND>(m_slashPaletteWindow), HWND_TOP, x, y, width, height,
+                       SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        m_slashPaletteVisible = true;
+        ::InvalidateRect(static_cast<HWND>(m_slashPaletteWindow), nullptr, FALSE);
+        ::UpdateWindow(static_cast<HWND>(m_slashPaletteWindow));
+    }
+
+    intptr_t __stdcall ScintillaEditorHost::SlashPaletteWindowProc(void* window,
+                                                                    unsigned int message,
+                                                                    uintptr_t wParam,
+                                                                    intptr_t lParam)
+    {
+        HWND hwnd = static_cast<HWND>(window);
+        if (message == WM_NCCREATE)
+        {
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+            return TRUE;
+        }
+
+        auto* host = reinterpret_cast<ScintillaEditorHost*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (!host)
+        {
+            return ::DefWindowProcW(hwnd, message, static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam));
+        }
+
+        switch (message)
+        {
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            host->PaintSlashPalette(window);
+            return 0;
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+        default:
+            return ::DefWindowProcW(hwnd, message, static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam));
+        }
+    }
+
+    void ScintillaEditorHost::PaintSlashPalette(void* window)
+    {
+        HWND hwnd = static_cast<HWND>(window);
+        RECT client{};
+        ::GetClientRect(hwnd, &client);
+        const int width = client.right - client.left;
+        const int height = client.bottom - client.top;
+
+        PAINTSTRUCT ps{};
+        HDC hdc = ::BeginPaint(hwnd, &ps);
+        HDC buffer = ::CreateCompatibleDC(hdc);
+        HBITMAP bitmap = ::CreateCompatibleBitmap(hdc, width, height);
+        HGDIOBJ oldBitmap = ::SelectObject(buffer, bitmap);
+
+        const auto makeBrush = [](const ImVec4& color) { return ::CreateSolidBrush(ToColorRef(color)); };
+        const auto makePen = [](const ImVec4& color, int thickness = 1) { return ::CreatePen(PS_SOLID, thickness, ToColorRef(color)); };
+        const auto fillRect = [&](int left, int top, int right, int bottom, const ImVec4& color) {
+            HBRUSH brush = makeBrush(color);
+            RECT rect{left, top, right, bottom};
+            ::FillRect(buffer, &rect, brush);
+            ::DeleteObject(brush);
+        };
+        const auto drawLine = [&](int x1, int y1, int x2, int y2, const ImVec4& color, int thickness = 1) {
+            HPEN pen = makePen(color, thickness);
+            HGDIOBJ oldPen = ::SelectObject(buffer, pen);
+            ::MoveToEx(buffer, x1, y1, nullptr);
+            ::LineTo(buffer, x2, y2);
+            ::SelectObject(buffer, oldPen);
+            ::DeleteObject(pen);
+        };
+        const auto drawText = [&](std::string_view text, int left, int top, int right, int bottom, const ImVec4& color, bool bold = false) {
+            HFONT font = ::CreateFontW(bold ? -14 : -13, 0, 0, 0, bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                       DEFAULT_PITCH | FF_DONTCARE, L"Cascadia Mono");
+            HGDIOBJ oldFont = ::SelectObject(buffer, font);
+            ::SetTextColor(buffer, ToColorRef(color));
+            ::SetBkMode(buffer, TRANSPARENT);
+            RECT rect{left, top, right, bottom};
+            std::string value(text);
+            ::DrawTextA(buffer, value.c_str(), static_cast<int>(value.size()), &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            ::SelectObject(buffer, oldFont);
+            ::DeleteObject(font);
+        };
+
+        fillRect(0, 0, width, height, MixColor(UI::Background, UI::Panel, 0.90f));
+        HBRUSH borderBrush = static_cast<HBRUSH>(::GetStockObject(NULL_BRUSH));
+        HPEN borderPen = makePen(MixColor(UI::Panel, UI::Muted, 0.28f), 1);
+        HGDIOBJ oldPen = ::SelectObject(buffer, borderPen);
+        HGDIOBJ oldBrush = ::SelectObject(buffer, borderBrush);
+        ::RoundRect(buffer, 0, 0, width - 1, height - 1, 7, 7);
+        ::SelectObject(buffer, oldBrush);
+        ::SelectObject(buffer, oldPen);
+        ::DeleteObject(borderPen);
+
+        drawLine(12, 23, width - 12, 23, MixColor(UI::Panel, UI::Cyan, 0.18f), 1);
+        drawText("blocks", 16, 3, 80, 22, UI::Cyan, true);
+        drawText("(up/down) move   (tab) select", width - 254, 3, width - 8, 22, UI::Muted, false);
+
+        const int rowTop = 28;
+        const int rowHeight = 23;
+        const int rowLeft = 10;
+        const int rowRight = width - 10;
+        const std::size_t visibleCount = std::min<std::size_t>(m_slashPaletteCommands.size(), 7);
+        const std::size_t firstVisible = static_cast<std::size_t>(std::clamp<int>(
+            m_slashPaletteScrollOffset,
+            0,
+            std::max(0, static_cast<int>(m_slashPaletteCommands.size()) - static_cast<int>(visibleCount))));
+        for (std::size_t visibleIndex = 0; visibleIndex < visibleCount; ++visibleIndex)
+        {
+            const std::size_t commandIndex = firstVisible + visibleIndex;
+            if (commandIndex >= m_slashPaletteCommands.size())
+            {
+                break;
+            }
+
+            const int top = rowTop + static_cast<int>(visibleIndex) * rowHeight;
+            const int bottom = top + rowHeight - 2;
+            const bool selected = static_cast<int>(commandIndex) == m_slashPaletteSelectedIndex;
+
+            if (selected)
+            {
+                fillRect(rowLeft, top, rowRight, bottom, MixColor(UI::Panel, UI::Green, 0.11f));
+            }
+            else if (visibleIndex > 0)
+            {
+                drawLine(rowLeft + 10, top - 2, rowRight - 10, top - 2, MixColor(UI::Panel, UI::Muted, 0.10f), 1);
+            }
+
+            const auto& command = m_slashPaletteCommands[commandIndex];
+            std::string id(command.id);
+            drawText(id, rowLeft + 16, top + 1, rowRight - 12, bottom - 1, selected ? UI::Green : UI::Primary, true);
+        }
+
+        ::BitBlt(hdc, 0, 0, width, height, buffer, 0, 0, SRCCOPY);
+        ::SelectObject(buffer, oldBitmap);
+        ::DeleteObject(bitmap);
+        ::DeleteDC(buffer);
+        ::EndPaint(hwnd, &ps);
+    }
+#endif
 
     bool ScintillaEditorHost::HandleSmartEnter()
     {
@@ -781,9 +1135,21 @@ namespace Software::Slate
 #if defined(_WIN32)
         if (!m_editorWindow)
         {
+            HideSlashCommandPalette();
+            if (m_slashPaletteWindow)
+            {
+                ::DestroyWindow(static_cast<HWND>(m_slashPaletteWindow));
+                m_slashPaletteWindow = nullptr;
+            }
             return;
         }
 
+        HideSlashCommandPalette();
+        if (m_slashPaletteWindow)
+        {
+            ::DestroyWindow(static_cast<HWND>(m_slashPaletteWindow));
+            m_slashPaletteWindow = nullptr;
+        }
         HWND window = static_cast<HWND>(m_editorWindow);
         if (m_editorProc)
         {
@@ -850,7 +1216,8 @@ namespace Software::Slate
         const COLORREF primary = ToColorRef(UI::Primary);
         const COLORREF muted = ToColorRef(UI::Muted);
         const COLORREF panel = ToColorRef(UI::Panel);
-        const COLORREF selection = ToColorRef(MixColor(UI::Background, UI::Cyan, 0.20f));
+        const COLORREF selection = ToColorRef(MixColor(UI::Background, UI::Cyan, 0.38f));
+        const COLORREF selectedText = ToColorRef(UI::Primary);
         const COLORREF caretLine = ToColorRef(MixColor(UI::Background, UI::Panel, 0.72f));
 
         const auto call = [this](unsigned int message, uintptr_t wParam = 0, intptr_t lParam = 0) {
@@ -885,7 +1252,8 @@ namespace Software::Slate
         call(SCI_SETCARETLINEBACK, caretLine, 0);
         call(SCI_SETCARETLINEVISIBLE, m_editorSettings.highlightCurrentLine ? 1 : 0, 0);
         call(SCI_SETSELBACK, 1, selection);
-        call(SCI_SETSELFORE, 0, 0);
+        call(SCI_SETSELFORE, 1, selectedText);
+        call(SCI_HIDESELECTION, 0, 0);
         call(SCI_SETWHITESPACEFORE, 1, muted);
         call(SCI_SETWHITESPACEBACK, 1, background);
         call(SCI_SETVIEWWS, m_editorSettings.showWhitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE, 0);
@@ -952,6 +1320,11 @@ namespace Software::Slate
 
         call(SCI_STYLESETFORE, SCE_MARKDOWN_STRIKEOUT, muted);
         call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, ToColorRef(UI::MarkdownTable));
+
+        call(SCI_CALLTIPSETBACK, panel, 0);
+        call(SCI_CALLTIPSETFORE, primary, 0);
+        call(SCI_CALLTIPSETFOREHLT, ToColorRef(UI::Cyan), 0);
+        call(SCI_CALLTIPUSESTYLE, 16, 0);
 
         call(SCI_COLOURISE, 0, -1);
 #endif
@@ -1099,20 +1472,50 @@ namespace Software::Slate
                 m_pendingCommands |= CommandMask(NativeEditorCommand::PasteClipboardImage);
                 return 0;
             }
+            const bool shiftPressed = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (!ctrlPressed && !altPressed && !shiftPressed && !HasSelection())
+            {
+                std::string lineText;
+                std::size_t caretColumn = 0;
+                std::string slashQuery;
+                const bool hasSlashQuery = CurrentLineTextAndCaret(&lineText, &caretColumn) &&
+                                           SlashCommandService::QueryFromLineAtCaret(lineText, caretColumn, &slashQuery);
+                if (m_slashPaletteInputSuppressed && (!hasSlashQuery || slashQuery != m_slashPaletteSuppressedQuery))
+                {
+                    m_slashPaletteInputSuppressed = false;
+                    m_slashPaletteSuppressedQuery.clear();
+                }
+                if (hasSlashQuery && !m_slashPaletteInputSuppressed)
+                {
+                    if (wParam == VK_DOWN)
+                    {
+                        m_pendingCommands |= CommandMask(NativeEditorCommand::SlashNext);
+                        return 0;
+                    }
+                    if (wParam == VK_UP)
+                    {
+                        m_pendingCommands |= CommandMask(NativeEditorCommand::SlashPrevious);
+                        return 0;
+                    }
+                    if (wParam == VK_TAB)
+                    {
+                        m_pendingCommands |= CommandMask(NativeEditorCommand::SlashAccept);
+                        m_suppressNextTabCharacter = true;
+                        return 0;
+                    }
+                    if (wParam == VK_ESCAPE)
+                    {
+                        m_slashPaletteInputSuppressed = true;
+                        m_slashPaletteSuppressedQuery = slashQuery;
+                        m_pendingCommands |= CommandMask(NativeEditorCommand::SlashCancel);
+                        return 0;
+                    }
+                }
+            }
             if (wParam == VK_ESCAPE)
             {
                 m_pendingCommands |= CommandMask(NativeEditorCommand::Escape);
                 return 0;
-            }
-            if (!ctrlPressed && !altPressed && wParam == VK_RETURN)
-            {
-                std::string lineText;
-                if (CurrentLineText(&lineText) && IsTodoSlashCommand(lineText))
-                {
-                    DeleteCurrentLine();
-                    m_pendingCommands |= CommandMask(NativeEditorCommand::Todo);
-                    return 0;
-                }
             }
             if (m_editorSettings.autoListContinuation &&
                 !ctrlPressed && !altPressed && wParam == VK_RETURN && HandleSmartEnter())
@@ -1122,6 +1525,12 @@ namespace Software::Slate
         }
         else if (message == WM_CHAR)
         {
+            if (wParam == '\t' && m_suppressNextTabCharacter)
+            {
+                m_suppressNextTabCharacter = false;
+                return 0;
+            }
+
             const bool controlCharacter = wParam < 32;
             const bool allowCommonControls = wParam == '\b' || wParam == '\t' || wParam == '\n' || wParam == '\r';
             if ((ctrlPressed && !altPressed && controlCharacter) || wParam == 27 || (controlCharacter && !allowCommonControls))

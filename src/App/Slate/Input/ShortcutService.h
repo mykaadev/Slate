@@ -43,6 +43,8 @@ namespace Software::Slate
         SearchPrevious,
         SearchMode,
         TodoState,
+        TodoPriority,
+        TodoEdit,
         TodoOpen,
         TodoDelete,
         WorkspaceNew,

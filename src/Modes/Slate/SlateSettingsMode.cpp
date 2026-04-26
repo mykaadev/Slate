@@ -39,6 +39,7 @@ namespace Software::Modes::Slate
             IndentMode,
             AutoListContinuation,
             PasteClipboardImages,
+            ImageStoragePolicy,
             Count
         };
 
@@ -159,6 +160,18 @@ namespace Software::Modes::Slate
                 {0, "crisp"},
                 {1, "calm"},
                 {2, "anchored"},
+            }};
+            return options;
+        }
+
+        const std::array<NamedIntOption, 5>& ImageStoragePolicyOptions()
+        {
+            static constexpr std::array<NamedIntOption, 5> options{{
+                {static_cast<int>(Software::Slate::ImageStoragePolicy::WorkspaceMediaFolder), "workspace media"},
+                {static_cast<int>(Software::Slate::ImageStoragePolicy::SameFolderAsNote), "same folder"},
+                {static_cast<int>(Software::Slate::ImageStoragePolicy::SubfolderUnderNoteFolder), "note attachments"},
+                {static_cast<int>(Software::Slate::ImageStoragePolicy::LinkOriginal), "link original"},
+                {static_cast<int>(Software::Slate::ImageStoragePolicy::EmbedInMarkdown), "embed in note"},
             }};
             return options;
         }
@@ -409,6 +422,12 @@ namespace Software::Modes::Slate
                     workspace.SetEditorSettings(editorSettings);
                     saveEditor();
                     break;
+                case SettingsRow::ImageStoragePolicy:
+                    editorSettings.imageStoragePolicy =
+                        CycleNamedOption(ImageStoragePolicyOptions(), editorSettings.imageStoragePolicy, delta);
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
                 case SettingsRow::Count:
                     break;
                     }
@@ -502,6 +521,8 @@ namespace Software::Modes::Slate
                        "smart lists", OnOffLabel(editorSettings.autoListContinuation));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::PasteClipboardImages),
                        "paste images", OnOffLabel(editorSettings.pasteClipboardImages));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::ImageStoragePolicy),
+                       "image storage", LabelForNamedOption(ImageStoragePolicyOptions(), editorSettings.imageStoragePolicy));
 
         ImGui::Dummy(ImVec2(1.0f, 12.0f));
         ImGui::TextColored(Muted, "shortcuts");

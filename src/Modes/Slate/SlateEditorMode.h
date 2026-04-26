@@ -2,6 +2,7 @@
 
 #include "App/Slate/Documents/DocumentService.h"
 #include "App/Slate/Markdown/JournalService.h"
+#include "App/Slate/Editor/SlashCommandService.h"
 #include "Modes/Slate/SlateModeBase.h"
 
 namespace Software::Modes::Slate
@@ -46,5 +47,23 @@ namespace Software::Modes::Slate
         void DrawMarkdownPreviewContent(Software::Core::Runtime::AppContext& context,
                                         const Software::Slate::DocumentService::Document& document,
                                         float contentWidth);
+        // Draws the inline slash-command palette when the active editor line starts with '/'.
+        void DrawSlashCommandPalette(Software::Core::Runtime::AppContext& context,
+                                     const Software::Slate::DocumentService::Document& document,
+                                     ImVec2 preferredScreenPos,
+                                     float preferredWidth);
+        // Applies one slash command to the active editor line.
+        bool ApplySlashCommand(Software::Core::Runtime::AppContext& context,
+                               Software::Slate::DocumentService::Document& document,
+                               Software::Slate::SlashCommandKind kind);
+
+        // Selected row inside the inline slash-command palette.
+        int m_slashCommandIndex = 0;
+        // Last typed slash query; used to reset selection when the query changes.
+        std::string m_slashCommandQuery;
+        // True when Escape has hidden the current slash menu until the query changes.
+        bool m_slashCommandSuppressed = false;
+        // Query hidden by Escape until the user changes the slash text.
+        std::string m_slashCommandSuppressedQuery;
     };
 }

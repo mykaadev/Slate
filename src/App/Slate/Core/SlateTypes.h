@@ -10,6 +10,21 @@ namespace Software::Slate
 {
     namespace fs = std::filesystem;
 
+    // Controls how pasted or dropped images are represented in Markdown.
+    enum class ImageStoragePolicy
+    {
+        // Copy image files into the workspace-level assets folder.
+        WorkspaceMediaFolder = 0,
+        // Copy image files next to the current note.
+        SameFolderAsNote = 1,
+        // Copy image files into an attachments folder beside the current note.
+        SubfolderUnderNoteFolder = 2,
+        // Do not copy dropped files; link to the existing file path instead.
+        LinkOriginal = 3,
+        // Encode image bytes directly into the Markdown image target.
+        EmbedInMarkdown = 4,
+    };
+
     // Describes one scanned path inside the workspace
     struct WorkspaceEntry
     {
@@ -75,14 +90,23 @@ namespace Software::Slate
         Done
     };
 
+    // Lists the todo priorities used by todo documents and the todo overlay.
+    enum class TodoPriority
+    {
+        Low,
+        Normal,
+        High,
+        Urgent
+    };
+
     // Describes one parsed todo ticket
     struct TodoTicket
     {
         // Stores the document that owns the todo
         fs::path relativePath;
-        // Stores the first line of the todo block
+        // Stores the main title line of the todo document or legacy block
         std::size_t line = 0;
-        // Stores the last line of the todo block
+        // Stores the last line of the todo document or legacy block
         std::size_t endLine = 0;
         // Stores the todo title text
         std::string title;
@@ -90,9 +114,11 @@ namespace Software::Slate
         std::string description;
         // Stores the current todo state
         TodoState state = TodoState::Open;
+        // Stores the current todo priority
+        TodoPriority priority = TodoPriority::Normal;
         // Mirrors done style tickets from legacy checkbox format
         bool done = false;
-        // Stores tags found in the todo block
+        // Stores tags found in the todo document or legacy block
         std::vector<std::string> tags;
     };
 
@@ -109,7 +135,7 @@ namespace Software::Slate
         std::vector<MarkdownLink> links;
         // Stores parsed tags
         std::vector<MarkdownTag> tags;
-        // Stores parsed todo blocks
+        // Stores parsed legacy inline todo blocks
         std::vector<TodoTicket> todos;
     };
 

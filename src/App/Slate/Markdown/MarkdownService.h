@@ -32,23 +32,6 @@ namespace Software::Slate
                                   TodoState* state,
                                   std::string* title = nullptr,
                                   bool* done = nullptr);
-        // Builds the markdown block used for saved todos
-        static std::string FormatTodoBlock(TodoState state,
-                                           std::string_view title,
-                                           std::string_view description,
-                                           std::string_view lineEnding);
-        // Replaces one todo block inside a document
-        static bool ReplaceTodoTicketBlock(const std::string& text,
-                                           const TodoTicket& ticket,
-                                           TodoState state,
-                                           std::string_view title,
-                                           std::string_view description,
-                                           std::string* updatedText);
-        // Deletes one todo block from a document
-        static bool DeleteTodoTicketBlock(const std::string& text,
-                                          const TodoTicket& ticket,
-                                          std::string* updatedText);
-
     private:
         // Parses standard markdown links
         void ParseMarkdownLinks(const std::string& line, std::size_t lineNumber, std::size_t lineOffset,
@@ -59,7 +42,7 @@ namespace Software::Slate
         // Parses hash tags outside blocked regions
         void ParseTags(const std::string& line, std::size_t lineNumber, std::size_t lineOffset,
                        MarkdownSummary& summary) const;
-        // Parses a todo block and returns the last consumed line
+        // Parses a legacy inline todo block and returns the last consumed line
         std::size_t ParseTodoTicket(const std::vector<std::string>& lines,
                                     std::size_t index,
                                     std::size_t lineOffset,

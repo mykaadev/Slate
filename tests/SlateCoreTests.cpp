@@ -462,46 +462,34 @@ namespace
         CHECK(legacy.todos.front().done);
     }
 
-    void TestTodoBlockFormattingAndReplacement()
+    void TestTodoDocumentFormattingAndParsing()
     {
-        const std::string text =
-            "Intro\r\n"
-            "#todo - [Open] - Ship compact todos #ux\r\n"
-            "  Keep it tidy\r\n"
-            "After\r\n";
-        Software::Slate::MarkdownService markdown;
-        const auto summary = markdown.Parse(text);
-        CHECK(summary.todos.size() == 1);
+        const std::string text = Software::Slate::TodoService::FormatTodoDocument(
+            Software::Slate::TodoState::Doing,
+            "Ship todo files",
+            "Keep todo details editable\nAdd useful notes",
+            "\n");
 
-        std::string updated;
-        CHECK(Software::Slate::MarkdownService::ReplaceTodoTicketBlock(text,
-                                                                       summary.todos.front(),
-                                                                       Software::Slate::TodoState::Done,
-                                                                       "Ship compact todos #ux",
-                                                                       "Wrapped up",
-                                                                       &updated));
-        CHECK(updated ==
-              "Intro\r\n"
-              "#todo - [Done] - Ship compact todos #ux\r\n"
-              "  Wrapped up\r\n"
-              "After\r\n");
-
-        std::string deleted;
-        CHECK(Software::Slate::MarkdownService::DeleteTodoTicketBlock(text, summary.todos.front(), &deleted));
-        CHECK(deleted ==
-              "Intro\r\n"
-              "After\r\n");
+        Software::Slate::TodoTicket ticket;
+        CHECK(Software::Slate::TodoService::ParseTodoDocument(text, "Todos/ship-todo-files.md", &ticket));
+        CHECK(ticket.relativePath == fs::path("Todos/ship-todo-files.md"));
+        CHECK(ticket.state == Software::Slate::TodoState::Doing);
+        CHECK(ticket.priority == Software::Slate::TodoPriority::Normal);
+        CHECK(ticket.title == "Ship todo files");
+        CHECK(ticket.description == "Keep todo details editable\nAdd useful notes");
+        CHECK(ticket.line == 7);
+        CHECK(!Software::Slate::TodoService::IsTodoDocument("# Normal note\n", "Notes/Normal.md"));
     }
 
     void TestEditorDocumentReplaceActiveLineWithText()
     {
         Software::Slate::EditorDocumentViewModel editor;
-        editor.Load("first\n/todo\nlast", "\n");
-        editor.SetActiveLine(1, 5);
-        CHECK(editor.ReplaceActiveLineWithText("#todo - [Open] - Title\n  Description"));
+        editor.Load("first\n/template\nlast", "\n");
+        editor.SetActiveLine(1, 9);
+        CHECK(editor.ReplaceActiveLineWithText("inserted\ncontent"));
         CHECK(editor.ActiveLine() == 2);
-        CHECK(editor.ActiveLineText() == "  Description");
-        CHECK(editor.ToText() == "first\n#todo - [Open] - Title\n  Description\nlast");
+        CHECK(editor.ActiveLineText() == "content");
+        CHECK(editor.ToText() == "first\ninserted\ncontent\nlast");
     }
 
     void TestWorkspaceRegistry()
@@ -678,7 +666,7 @@ int main()
     TestEditorSingleCharacterDeletionDoesNotMergeLines();
     TestMarkdownInlineSpans();
     TestMarkdownTagsAndTodos();
-    TestTodoBlockFormattingAndReplacement();
+    TestTodoDocumentFormattingAndParsing();
     TestEditorDocumentReplaceActiveLineWithText();
     TestWorkspaceRegistry();
     TestThemeServiceRoundTrip();

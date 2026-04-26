@@ -26,6 +26,7 @@ namespace Software::Slate
         bool indentWithTabs = false;
         bool autoListContinuation = true;
         bool pasteClipboardImages = true;
+        int imageStoragePolicy = static_cast<int>(ImageStoragePolicy::SubfolderUnderNoteFolder);
     };
 
     class EditorSettingsService

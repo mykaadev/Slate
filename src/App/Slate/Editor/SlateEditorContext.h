@@ -57,6 +57,10 @@ namespace Software::Slate
         void InsertTextAtCursor(DocumentService& documents, const std::string& text, double elapsedSeconds);
         // Reads the current active line text
         bool ActiveLineText(std::string* text) const;
+        // Reads the current active line text and caret column.
+        bool ActiveLineTextAndCaret(std::string* text, std::size_t* caretColumn) const;
+        // Reports whether the active editor path currently has selected text.
+        bool HasSelection() const;
         // Replaces the current line with a text block
         bool ReplaceActiveLineWithText(DocumentService& documents, const std::string& text, double elapsedSeconds);
         // Parses headings from the active document
@@ -69,7 +73,8 @@ namespace Software::Slate
         void InvalidateJournalSummary();
         // Imports dropped files into the current document
         int ProcessDroppedFiles(std::vector<std::string>* droppedFiles, DocumentService& documents, AssetService& assets,
-                                double elapsedSeconds, std::string* error = nullptr);
+                                ImageStoragePolicy imageStoragePolicy, double elapsedSeconds,
+                                std::string* error = nullptr);
 
         // Attaches the native editor host to the app window
         void AttachToNativeWindow(void* nativeHandle);
@@ -97,6 +102,10 @@ namespace Software::Slate
         void NotifyDocumentSaved();
         // Pulls one pending command from the native editor
         bool ConsumeNativeCommand(NativeEditorCommand command);
+        // Shows native slash-command suggestions above the Scintilla editor window.
+        void ShowNativeSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex);
+        // Hides native slash-command suggestions.
+        void HideNativeSlashCommandPalette();
         // Releases focus from the native editor
         void ReleaseNativeEditorFocus();
 
