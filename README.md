@@ -117,6 +117,10 @@ The goal is not to be an Obsidian clone, a cloud workspace, or a giant knowledge
 
 </div>
 
+<div align="center">
+  <img src="https://github.com/mykaadev/Slate/blob/main/resources/FileTree.png" width="700" alt="File Tree" />
+</div>
+
 ### Journaling and todos
 
 <div align="center">
