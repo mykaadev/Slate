@@ -1,5 +1,6 @@
 #pragma once
 
+#include "App/Slate/Editor/Live/LiveEditor.h"
 #include "Modes/Slate/SlateModeBase.h"
 
 namespace Software::Modes::Slate
@@ -45,5 +46,13 @@ namespace Software::Modes::Slate
         void DrawPathList(Software::Core::Runtime::AppContext& context, const char* title, const char* emptyText);
         // Draws the file tree view
         void DrawFileTree(Software::Core::Runtime::AppContext& context, bool folderPicker);
+        // Draws a rendered preview of the selected note or a folder summary
+        void DrawPreview(Software::Core::Runtime::AppContext& context, float width, float height);
+
+        // Read-only live editor used for the preview pane
+        Software::Slate::Live::LiveEditor m_preview;
+        // Stores the note shown in the preview and when it was last read
+        Software::Slate::fs::path m_previewPath;
+        double m_previewLoadedAt = -10.0;
     };
 }

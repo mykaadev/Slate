@@ -10,6 +10,7 @@
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
+#include <utility>
 
 namespace Software::Slate
 {
@@ -49,79 +50,99 @@ namespace Software::Slate
             return a.key == b.key && a.ctrl == b.ctrl && a.shift == b.shift && a.alt == b.alt;
         }
 
+        // Every key a binding can use, with its config name
+        const std::vector<std::pair<ImGuiKey, std::string>>& KeyNames()
+        {
+            static const std::vector<std::pair<ImGuiKey, std::string>> names = [] {
+                std::vector<std::pair<ImGuiKey, std::string>> list{
+                    {ImGuiKey_Enter, "enter"}, {ImGuiKey_Escape, "esc"}, {ImGuiKey_Tab, "tab"},
+                    {ImGuiKey_Space, "space"}, {ImGuiKey_Backspace, "backspace"}, {ImGuiKey_Delete, "del"},
+                    {ImGuiKey_Insert, "insert"}, {ImGuiKey_Home, "home"}, {ImGuiKey_End, "end"},
+                    {ImGuiKey_PageUp, "pageup"}, {ImGuiKey_PageDown, "pagedown"},
+                    {ImGuiKey_UpArrow, "up"}, {ImGuiKey_DownArrow, "down"}, {ImGuiKey_LeftArrow, "left"},
+                    {ImGuiKey_RightArrow, "right"}, {ImGuiKey_Slash, "/"}, {ImGuiKey_Backslash, "\\"},
+                    {ImGuiKey_Comma, ","}, {ImGuiKey_Period, "."}, {ImGuiKey_Semicolon, ";"},
+                    {ImGuiKey_Apostrophe, "'"}, {ImGuiKey_Minus, "-"}, {ImGuiKey_Equal, "="},
+                    {ImGuiKey_LeftBracket, "["}, {ImGuiKey_RightBracket, "]"}, {ImGuiKey_GraveAccent, "`"},
+                };
+                for (int i = 0; i < 26; ++i)
+                {
+                    list.emplace_back(static_cast<ImGuiKey>(ImGuiKey_A + i), std::string(1, static_cast<char>('a' + i)));
+                }
+                for (int i = 0; i < 10; ++i)
+                {
+                    list.emplace_back(static_cast<ImGuiKey>(ImGuiKey_0 + i), std::string(1, static_cast<char>('0' + i)));
+                }
+                for (int i = 0; i < 12; ++i)
+                {
+                    list.emplace_back(static_cast<ImGuiKey>(ImGuiKey_F1 + i), "f" + std::to_string(i + 1));
+                }
+                return list;
+            }();
+            return names;
+        }
+
         const char* KeyName(ImGuiKey key)
         {
-            switch (key)
+            if (key == ImGuiKey_None)
             {
-            case ImGuiKey_None: return "none";
-            case ImGuiKey_Enter: return "enter";
-            case ImGuiKey_KeypadEnter: return "enter";
-            case ImGuiKey_Escape: return "esc";
-            case ImGuiKey_Tab: return "tab";
-            case ImGuiKey_Slash: return "/";
-            case ImGuiKey_UpArrow: return "up";
-            case ImGuiKey_DownArrow: return "down";
-            case ImGuiKey_LeftArrow: return "left";
-            case ImGuiKey_RightArrow: return "right";
-            case ImGuiKey_Delete: return "del";
-            case ImGuiKey_Backspace: return "backspace";
-            case ImGuiKey_A: return "a";
-            case ImGuiKey_C: return "c";
-            case ImGuiKey_D: return "d";
-            case ImGuiKey_E: return "e";
-            case ImGuiKey_F: return "f";
-            case ImGuiKey_J: return "j";
-            case ImGuiKey_M: return "m";
-            case ImGuiKey_N: return "n";
-            case ImGuiKey_O: return "o";
-            case ImGuiKey_P: return "p";
-            case ImGuiKey_Q: return "q";
-            case ImGuiKey_R: return "r";
-            case ImGuiKey_S: return "s";
-            case ImGuiKey_T: return "t";
-            case ImGuiKey_W: return "w";
-            case ImGuiKey_X: return "x";
-            case ImGuiKey_Y: return "y";
-            default: return "key";
+                return "none";
             }
+            if (key == ImGuiKey_KeypadEnter)
+            {
+                key = ImGuiKey_Enter;
+            }
+            for (const auto& [candidate, name] : KeyNames())
+            {
+                if (candidate == key)
+                {
+                    return name.c_str();
+                }
+            }
+            return "key";
         }
 
         bool KeyFromName(const std::string& key, ImGuiKey* out)
         {
-            static const std::unordered_map<std::string, ImGuiKey> keys{
-                {"none", ImGuiKey_None}, {"enter", ImGuiKey_Enter}, {"return", ImGuiKey_Enter},
-                {"esc", ImGuiKey_Escape}, {"escape", ImGuiKey_Escape}, {"tab", ImGuiKey_Tab},
-                {"/", ImGuiKey_Slash}, {"slash", ImGuiKey_Slash}, {"?", ImGuiKey_Slash},
-                {"up", ImGuiKey_UpArrow}, {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow},
-                {"right", ImGuiKey_RightArrow}, {"del", ImGuiKey_Delete}, {"delete", ImGuiKey_Delete},
-                {"backspace", ImGuiKey_Backspace},
-                {"a", ImGuiKey_A}, {"c", ImGuiKey_C}, {"d", ImGuiKey_D}, {"e", ImGuiKey_E}, {"f", ImGuiKey_F},
-                {"j", ImGuiKey_J}, {"m", ImGuiKey_M}, {"n", ImGuiKey_N}, {"o", ImGuiKey_O},
-                {"p", ImGuiKey_P}, {"q", ImGuiKey_Q}, {"r", ImGuiKey_R}, {"s", ImGuiKey_S},
-                {"t", ImGuiKey_T}, {"w", ImGuiKey_W}, {"x", ImGuiKey_X}, {"y", ImGuiKey_Y},
+            static const std::unordered_map<std::string, ImGuiKey> aliases{
+                {"none", ImGuiKey_None}, {"return", ImGuiKey_Enter}, {"escape", ImGuiKey_Escape},
+                {"slash", ImGuiKey_Slash}, {"?", ImGuiKey_Slash}, {"delete", ImGuiKey_Delete},
+                {"pgup", ImGuiKey_PageUp}, {"pgdn", ImGuiKey_PageDown}, {"plus", ImGuiKey_Equal},
             };
-            const auto it = keys.find(key);
-            if (it == keys.end())
+            if (const auto it = aliases.find(key); it != aliases.end())
             {
-                return false;
+                if (out)
+                {
+                    *out = it->second;
+                }
+                return true;
             }
-            if (out)
+            for (const auto& [candidate, name] : KeyNames())
             {
-                *out = it->second;
+                if (name == key)
+                {
+                    if (out)
+                    {
+                        *out = candidate;
+                    }
+                    return true;
+                }
             }
-            return true;
+            return false;
         }
 
         std::vector<ImGuiKey> CaptureKeys()
         {
-            return {
-                ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Tab, ImGuiKey_Slash,
-                ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_LeftArrow, ImGuiKey_RightArrow,
-                ImGuiKey_Delete, ImGuiKey_Backspace,
-                ImGuiKey_A, ImGuiKey_C, ImGuiKey_D, ImGuiKey_E, ImGuiKey_F, ImGuiKey_J, ImGuiKey_M,
-                ImGuiKey_N, ImGuiKey_O, ImGuiKey_P, ImGuiKey_Q, ImGuiKey_R, ImGuiKey_S,
-                ImGuiKey_T, ImGuiKey_W, ImGuiKey_X, ImGuiKey_Y,
-            };
+            std::vector<ImGuiKey> keys{ImGuiKey_KeypadEnter};
+            for (const auto& [key, name] : KeyNames())
+            {
+                (void)name;
+                if (key != ImGuiKey_Escape)
+                {
+                    keys.push_back(key);
+                }
+            }
+            return keys;
         }
 
         bool ModifiersMatch(const KeyBinding& binding)

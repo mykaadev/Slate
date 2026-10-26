@@ -1,6 +1,7 @@
 #include "Modes/Slate/SlateBrowserMode.h"
 
 #include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Documents/DocumentService.h"
 #include "App/Slate/Editor/SlateEditorContext.h"
 #include "App/Slate/Core/SlateModeIds.h"
 #include "App/Slate/State/SlateUiState.h"
@@ -819,9 +820,21 @@ namespace Software::Modes::Slate
     void SlateBrowserMode::DrawFileTree(Software::Core::Runtime::AppContext& context, bool folderPicker)
     {
         auto& ui = UiState(context);
-        const float width = CenteredColumnWidth(820.0f);
+        // Wide windows get a live preview of the selected note next to the tree
+        const bool showPreview = !folderPicker && ImGui::GetWindowWidth() > 1100.0f;
+        const float totalWidth = CenteredColumnWidth(showPreview ? 1560.0f : 820.0f);
+        const float previewGap = 28.0f;
+        const float width = showPreview ? std::clamp(totalWidth * 0.32f, 300.0f, 460.0f) : totalWidth;
         const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
-        SetCursorCenteredForWidth(width);
+        SetCursorCenteredForWidth(totalWidth);
+        const float rowY = ImGui::GetCursorPosY();
+        const float rowX = ImGui::GetCursorPosX();
+        if (showPreview)
+        {
+            ImGui::SetCursorPos(ImVec2(rowX + width + previewGap, rowY));
+            DrawPreview(context, totalWidth - width - previewGap, height);
+            ImGui::SetCursorPos(ImVec2(rowX, rowY));
+        }
         ImGui::BeginChild("BrowserFileTree", ImVec2(width, height), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -1080,5 +1093,82 @@ namespace Software::Modes::Slate
                               label.c_str());
         }
         ImGui::EndChild();
+    }
+
+    void SlateBrowserMode::DrawPreview(Software::Core::Runtime::AppContext& context, float width, float height)
+    {
+        auto& ui = UiState(context);
+        auto& workspace = WorkspaceContext(context);
+        const auto& editorSettings = workspace.CurrentEditorSettings();
+
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(Panel.x, Panel.y, Panel.z, 0.45f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
+        ImGui::BeginChild("BrowserPreview", ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding);
+
+        const Software::Slate::TreeViewRow* row =
+            ui.navigation.Selected() < ui.treeRows.size() ? &ui.treeRows[ui.navigation.Selected()] : nullptr;
+        if (!row)
+        {
+            ImGui::TextColored(Muted, "select a note to preview it");
+        }
+        else if (row->isDirectory)
+        {
+            // Folders show what is inside them
+            std::size_t notes = 0;
+            for (const auto& file : workspace.Workspace().MarkdownFiles())
+            {
+                if (Software::Slate::PathIsDescendantOf(file, row->relativePath) || row->relativePath == ".")
+                {
+                    ++notes;
+                }
+            }
+            ImGui::TextColored(Cyan, "%s/", DisplayNameForTreeRow(*row).c_str());
+            ImGui::TextColored(Muted, "%zu note%s inside", notes, notes == 1 ? "" : "s");
+        }
+        else
+        {
+            const auto relative = row->relativePath;
+            const double now = context.frame.elapsedSeconds;
+            if (relative != m_previewPath || now - m_previewLoadedAt > 2.0)
+            {
+                std::string text;
+                Software::Slate::DocumentService::ReadTextFile(workspace.Workspace().Resolve(relative), &text);
+                if (relative != m_previewPath || text != m_preview.Text())
+                {
+                    m_preview.Load(text, "\n", relative.generic_u8string());
+                }
+                m_previewPath = relative;
+                m_previewLoadedAt = now;
+            }
+
+            ImGui::TextColored(Primary, "%s", relative.stem().u8string().c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(Muted, "  %s", relative.parent_path().generic_u8string().c_str());
+            ImGui::Dummy(ImVec2(1.0f, 4.0f));
+
+            Software::Slate::Live::LiveEditorSettings settings;
+            settings.fontSize = static_cast<float>(editorSettings.fontSize) * 0.92f;
+            settings.lineGap = static_cast<float>(editorSettings.lineSpacing);
+            settings.headingScale = editorSettings.headingScale;
+            settings.readOnly = true;
+            settings.highlightLine = false;
+
+            Software::Slate::Live::LiveEditorHooks hooks;
+            const auto root = workspace.Workspace().Root();
+            hooks.resolveImage = [root, relative](const std::string& target) {
+                return (root / relative.parent_path() / Software::Slate::fs::u8path(target)).lexically_normal();
+            };
+            hooks.openLink = [](const std::string&, bool) {};
+
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            PushSlateScrollbarStyle(editorSettings.scrollbarStyle);
+            m_preview.Draw("BrowserPreviewEditor", available, settings, hooks, context.frame.elapsedSeconds);
+            PopSlateScrollbarStyle();
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
     }
 }

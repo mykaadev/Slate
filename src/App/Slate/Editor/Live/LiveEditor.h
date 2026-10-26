@@ -227,6 +227,7 @@ namespace Software::Slate::Live
         std::size_t m_revealLast = 0;
         bool m_hasReveal = false;
         std::uint64_t m_visualRevision = 0;
+        bool m_resetScroll = false;
         double m_now = 0.0;
         float m_contentWidth = 600.0f;
         LiveEditorSettings m_settings;

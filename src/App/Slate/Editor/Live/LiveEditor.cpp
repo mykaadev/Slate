@@ -240,7 +240,7 @@ namespace Software::Slate::Live
         m_scrollToCaret = false;
         m_centerCaret = false;
         m_dragging = false;
-        ImGui::SetScrollY(0.0f);
+        m_resetScroll = true;
     }
 
     void LiveEditor::Clear()
@@ -2119,6 +2119,11 @@ namespace Software::Slate::Live
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::BeginChild(id, size, ImGuiChildFlags_None, ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus);
 
+        if (m_resetScroll)
+        {
+            ImGui::SetScrollY(0.0f);
+            m_resetScroll = false;
+        }
         const ImVec2 available = ImGui::GetContentRegionAvail();
         const float gutter = settings.fontSize * 1.2f;
         float contentWidth = std::max(120.0f, available.x - gutter * 2.0f);
