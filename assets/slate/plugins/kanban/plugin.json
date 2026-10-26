@@ -5,5 +5,39 @@
   "description": "Your todo documents as a drag-and-drop board",
   "author": "Slate",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    {
+      "key": "sort_by",
+      "label": "sort cards by",
+      "type": "choice",
+      "options": [
+        "priority",
+        "title"
+      ],
+      "default": "priority",
+      "description": "order of cards inside a column"
+    },
+    {
+      "key": "show_done",
+      "label": "done column",
+      "type": "bool",
+      "default": true,
+      "description": "show the done column"
+    },
+    {
+      "key": "show_progress",
+      "label": "progress bar",
+      "type": "bool",
+      "default": true,
+      "description": "show how many cards are done"
+    },
+    {
+      "key": "card_details",
+      "label": "card details",
+      "type": "bool",
+      "default": true,
+      "description": "show the description under each card title"
+    }
+  ]
 }

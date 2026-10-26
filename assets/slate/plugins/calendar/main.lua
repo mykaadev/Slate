@@ -22,9 +22,10 @@ local function days_in_month(year, month)
   return os.date("*t", os.time { year = year, month = month + 1, day = 0 }).day
 end
 
--- Monday-based weekday of the first day of the month, 0..6
+-- Column of the first day of the month, 0..6, for the chosen week start
 local function first_weekday(year, month)
   local wday = os.date("*t", os.time { year = year, month = month, day = 1 }).wday
+  if slate.settings.get("week_start") == "sunday" then return wday - 1 end
   return (wday + 5) % 7
 end
 
@@ -58,6 +59,9 @@ slate.view.register {
 
     local cell = math.floor((ui.width() - 6 * 2) / 7)
     local weekdays = { "M", "T", "W", "T", "F", "S", "S" }
+    if slate.settings.get("week_start") == "sunday" then
+      weekdays = { "S", "M", "T", "W", "T", "F", "S" }
+    end
     for index, day in ipairs(weekdays) do
       ui.button(day .. "##weekday" .. index, { width = cell, color = "muted" })
       if index < 7 then ui.same_line(2) end
@@ -85,7 +89,9 @@ slate.view.register {
       column = column + 1
       if column % 7 ~= 0 and day < total then ui.same_line(2) end
     end
-    ui.space(4)
-    ui.muted(count .. " journal " .. (count == 1 and "entry" or "entries") .. " this month")
+    if slate.settings.get("show_count") then
+      ui.space(4)
+      ui.muted(count .. " journal " .. (count == 1 and "entry" or "entries") .. " this month")
+    end
   end,
 }

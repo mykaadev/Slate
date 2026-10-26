@@ -16,5 +16,7 @@ namespace Software::Modes::Slate
         void DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput) override;
         // Returns helper text for the view screen
         std::string ModeHelperText(const Software::Core::Runtime::AppContext& context) const override;
+        // The view title in capitals, for example KANBAN
+        std::string StatusBadge(const Software::Core::Runtime::AppContext& context) const override;
     };
 }

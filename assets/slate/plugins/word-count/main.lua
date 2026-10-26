@@ -17,13 +17,21 @@ local function refresh()
     return
   end
   local words = count_words(text)
-  local minutes = math.max(1, math.floor(words / 220 + 0.5))
-  slate.status.set("words", string.format("%d words · %d min", words, minutes))
+  local parts = { words .. " words" }
+  if slate.settings.get("count_characters") then
+    parts[#parts + 1] = (utf8.len(text) or #text) .. " chars"
+  end
+  if slate.settings.get("show_reading_time") then
+    local minutes = math.max(1, math.floor(words / slate.settings.get("words_per_minute") + 0.5))
+    parts[#parts + 1] = minutes .. " min"
+  end
+  slate.status.set("words", table.concat(parts, " · "))
 end
 
 slate.on("ready", refresh)
 slate.on("document_open", refresh)
 slate.on("document_change", refresh)
+slate.on("settings_changed", refresh)
 
 slate.command.register {
   id = "show",

@@ -145,13 +145,30 @@ App events live in `App/Slate/Core/SlateEvents.h` (`DocumentOpened`, `DocumentWi
 
 `PluginManager` (`App/Slate/Plugins`) gives each plugin its own sandboxed `lua_State`. Lua is compiled as C++, so script errors unwind with exceptions. `PluginLuaApi.cpp` holds the `slate.*` bindings. The plugin API is documented in `docs/PLUGINS.md`.
 
-## Live preview editor
+## Live editor
 
-`LivePreviewLexer` replaces Lexilla's Markdown lexer inside Scintilla. `StyleLivePreviewLine` is a pure function, unit tested in `SlateCoreTests`. It styles one line and carries fence and frontmatter state through Scintilla line states.
+The note editor is drawn by Slate with ImGui (`App/Slate/Editor/Live`). There is no native editor control, so every Markdown structure can render as a real widget.
 
-Syntax characters get the `Hidden` style (invisible) on every line except those touched by a selection. On those lines they get the dimmed `Markup` style. Scintilla treats invisible text as read-only, so `ScintillaEditorHost` follows two rules:
+| File | Role |
+| --- | --- |
+| `TextBuffer` | UTF-8 text with `
+` endings, a line index, word and code point motion, and grouped undo/redo |
+| `MarkdownBlocks` | Splits lines into blocks: code fences, tables, callouts, frontmatter, math, and single lines |
+| `CodeHighlighter` | Tokenizes fenced code for about 20 languages, carrying block comments across lines |
+| `InlineLayout` | Lays out one line into positioned atoms: wrapping with hanging indents, heading sizes, bullets, checkboxes, quote bars, and code/highlight/tag backgrounds. Plugins reuse it through `ui.markdown` |
+| `LiveEditor` | Builds per-frame visuals, draws widgets, owns caret, selection, mouse, keyboard, clipboard, and IME |
+| `LivePreviewLexer` | `StyleLivePreviewLine`: the per-byte styling rules shared by the layout |
 
-- `UpdateReveal()` runs before every key message and every frame, so the lines being edited always show their markup.
-- Programmatic edits call `RevealRangeForEdit` before they replace text.
+Rendering follows Obsidian's live preview model:
 
-Scintilla gives every line the same height, so heading sizes are opt-in (`heading_scale`). By default, headings use color and weight.
+- Lines and blocks touched by the selection show their Markdown source (dimmed syntax). Everything else renders.
+- Multi-line blocks (tables, callouts, code, properties, math) render as one widget and switch to source as a whole when the caret enters them. Arrow keys step into a widget the same way as into a line.
+- Rendered checkboxes toggle on click. Rendered links and tags act on a plain click; in source lines they need ctrl+click.
+- Layouts are cached by line text, width, and options, and only visible blocks draw.
+- `LiveEditorSettings::readOnly` gives the reading view (`ctrl+p`). The file browser uses the same editor read-only for its preview pane.
+
+`SlateEditorContext` wraps the editor for the rest of the app. Commands, slash commands, and plugins edit through it, and it commits edits back to `DocumentService` once per frame.
+
+## Plugin views
+
+`SlateExtensionRegistry` also stores views: `Page` views open in `SlateViewMode` (`:view <id>`), and `Sidebar` views show in the right column of the note screen. Lua views draw through the `ui` table in `PluginViewApi.cpp`. That file also holds the `slate.todos` bindings over `TodoService`. A failing view keeps its error and stops redrawing until the plugin reloads; ImGui's error recovery unwinds any panels the script left open.

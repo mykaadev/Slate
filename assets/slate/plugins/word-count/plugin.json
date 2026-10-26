@@ -5,5 +5,31 @@
   "description": "Shows words and reading time for the open note in the status line",
   "author": "Slate",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    {
+      "key": "show_reading_time",
+      "label": "reading time",
+      "type": "bool",
+      "default": true,
+      "description": "show minutes to read next to the word count"
+    },
+    {
+      "key": "words_per_minute",
+      "label": "reading speed",
+      "type": "number",
+      "default": 220,
+      "min": 100,
+      "max": 400,
+      "step": 20,
+      "description": "words per minute used for the reading time"
+    },
+    {
+      "key": "count_characters",
+      "label": "characters",
+      "type": "bool",
+      "default": false,
+      "description": "also show the character count"
+    }
+  ]
 }

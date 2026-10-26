@@ -84,6 +84,8 @@ namespace Software::Slate
 
         /** Navigation state for result rows. */
         NavigationController m_navigation;
+        // Scrolls the selected result into view after keyboard moves
+        bool m_navigationChanged = false;
 
         /** Results currently visible in the overlay. */
         std::vector<SearchResult> m_results;

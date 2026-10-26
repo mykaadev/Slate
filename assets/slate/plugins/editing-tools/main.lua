@@ -33,26 +33,30 @@ slate.command.register {
     local lines = {}
     for line in (selection .. "\n"):gmatch("(.-)\r?\n") do lines[#lines + 1] = line end
     if lines[#lines] == "" then table.remove(lines) end
-    table.sort(lines, function(a, b) return a:lower() < b:lower() end)
+    if slate.settings.get("sort_case_sensitive") then
+      table.sort(lines)
+    else
+      table.sort(lines, function(a, b) return a:lower() < b:lower() end)
+    end
     slate.editor.replace_selection(table.concat(lines, "\n"))
   end,
 }
 
 -- Optional: strip trailing whitespace on save. Lines ending in two spaces are Markdown
--- hard breaks, so those are kept. Toggle with :trim-on-save
+-- hard breaks, so those are kept. Toggle it in settings > plugins, or with :trim-on-save
 slate.command.register {
   id = "trim-on-save",
   label = "Toggle trim on save",
   aliases = { "trim-on-save" },
   run = function()
-    local enabled = not slate.settings.get("trim_on_save", false)
+    local enabled = not slate.settings.get("trim_on_save")
     slate.settings.set("trim_on_save", enabled)
     return "trim on save " .. (enabled and "on" or "off")
   end,
 }
 
 slate.on("document_before_save", function(path, text)
-  if not slate.settings.get("trim_on_save", false) then return end
+  if not slate.settings.get("trim_on_save") then return end
   return (text:gsub("([ \t]+)(\r?\n)", function(space, eol)
     if space == "  " then return space .. eol end
     return eol

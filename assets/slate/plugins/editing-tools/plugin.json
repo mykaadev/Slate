@@ -5,5 +5,21 @@
   "description": "Toggle tasks from the keyboard, sort lines, and tidy notes on save",
   "author": "Slate",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    {
+      "key": "trim_on_save",
+      "label": "trim on save",
+      "type": "bool",
+      "default": false,
+      "description": "strip trailing spaces when saving; markdown hard breaks stay"
+    },
+    {
+      "key": "sort_case_sensitive",
+      "label": "case-sensitive sort",
+      "type": "bool",
+      "default": false,
+      "description": "sort lines with capitals first"
+    }
+  ]
 }

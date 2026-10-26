@@ -49,7 +49,7 @@ namespace Software::Slate
 
     }
 
-    // Styles one line; kept free of Scintilla so the rules are unit testable
+    // Styles one line; kept free of ImGui so the rules are unit testable
     struct LivePreviewLine
     {
         // Stores one style per byte of the line text

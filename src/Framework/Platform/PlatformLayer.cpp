@@ -1,6 +1,7 @@
 #include "PlatformLayer.h"
 
 #include "Core/Runtime/AppConfig.h"
+#include "Platform/PlatformWindowService.h"
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -13,7 +14,11 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <string>
+#include <vector>
 #include <utility>
 
 namespace Software::Platform
@@ -72,6 +77,28 @@ namespace Software::Platform
             DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
         }
 #endif
+
+        // Merges symbol and emoji fallbacks into the font added last
+        void MergeSymbolFallbacks(ImGuiIO& io)
+        {
+            for (const char* fallback : {"C:/Windows/Fonts/seguisym.ttf", "C:/Windows/Fonts/seguiemj.ttf"})
+            {
+                FILE* file = nullptr;
+#if defined(_MSC_VER)
+                fopen_s(&file, fallback, "rb");
+#else
+                file = fopen(fallback, "rb");
+#endif
+                if (!file)
+                {
+                    continue;
+                }
+                fclose(file);
+                ImFontConfig config;
+                config.MergeMode = true;
+                io.Fonts->AddFontFromFileTTF(fallback, 18.0f, &config);
+            }
+        }
 
         void TryLoadFont(ImGuiIO& io, const char* path)
         {
@@ -133,23 +160,7 @@ namespace Software::Platform
         // Symbol and emoji fallbacks fill in glyphs the monospace font lacks (bullets, arrows, vault emoji)
         if (io.Fonts->Fonts.Size > 0)
         {
-            for (const char* fallback : {"C:/Windows/Fonts/seguisym.ttf", "C:/Windows/Fonts/seguiemj.ttf"})
-            {
-                FILE* file = nullptr;
-#if defined(_MSC_VER)
-                fopen_s(&file, fallback, "rb");
-#else
-                file = fopen(fallback, "rb");
-#endif
-                if (!file)
-                {
-                    continue;
-                }
-                fclose(file);
-                ImFontConfig config;
-                config.MergeMode = true;
-                io.Fonts->AddFontFromFileTTF(fallback, 18.0f, &config);
-            }
+            MergeSymbolFallbacks(io);
         }
 
         ImGui::StyleColorsDark();
@@ -192,6 +203,7 @@ namespace Software::Platform
 
     void PlatformLayer::BeginFrame()
     {
+        ApplyPendingFont();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -208,8 +220,121 @@ namespace Software::Platform
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        WritePendingCaptures(width, height);
 
         glfwSwapBuffers(m_window);
+    }
+
+    void PlatformLayer::RequestCapture(std::string path)
+    {
+        m_pendingCaptures.push_back(std::move(path));
+    }
+
+    void PlatformLayer::RequestFontFamily(std::string family)
+    {
+        if (family != m_activeFontFamily)
+        {
+            m_pendingFontFamily = std::move(family);
+        }
+    }
+
+    void PlatformLayer::ApplyPendingFont()
+    {
+        if (m_pendingFontFamily.empty())
+        {
+            return;
+        }
+        const std::string family = std::move(m_pendingFontFamily);
+        m_pendingFontFamily.clear();
+        m_activeFontFamily = family;
+
+        // Fonts load once and stay in the atlas, so switching back is instant
+        ImGuiIO& io = ImGui::GetIO();
+        for (ImFont* font : io.Fonts->Fonts)
+        {
+            if (font->GetDebugName() == family)
+            {
+                io.FontDefault = font;
+                return;
+            }
+        }
+        const std::string path = PlatformWindowService::FontFileForFamily(family);
+        if (path.empty())
+        {
+            return;
+        }
+        ImFontConfig config;
+        const std::size_t length = (std::min)(family.size(), sizeof(config.Name) - 1);
+        family.copy(config.Name, length);
+        config.Name[length] = '\0';
+        if (ImFont* font = io.Fonts->AddFontFromFileTTF(path.c_str(), 18.0f, &config))
+        {
+            MergeSymbolFallbacks(io);
+            io.FontDefault = font;
+        }
+    }
+
+    void PlatformLayer::WritePendingCaptures(int width, int height)
+    {
+        if (m_pendingCaptures.empty() || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        // OpenGL rows run bottom-up, which is exactly how BMP stores them
+        std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        for (std::size_t i = 0; i < pixels.size(); i += 4)
+        {
+            std::swap(pixels[i], pixels[i + 2]);
+            pixels[i + 3] = 255;
+        }
+
+        const auto put16 = [](std::vector<unsigned char>& out, std::uint32_t value) {
+            out.push_back(static_cast<unsigned char>(value & 0xFF));
+            out.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
+        };
+        const auto put32 = [&put16](std::vector<unsigned char>& out, std::uint32_t value) {
+            put16(out, value & 0xFFFF);
+            put16(out, value >> 16);
+        };
+        std::vector<unsigned char> header;
+        const std::uint32_t imageSize = static_cast<std::uint32_t>(pixels.size());
+        header.push_back('B');
+        header.push_back('M');
+        put32(header, 54 + imageSize);
+        put32(header, 0);
+        put32(header, 54);
+        put32(header, 40);
+        put32(header, static_cast<std::uint32_t>(width));
+        put32(header, static_cast<std::uint32_t>(height));
+        put16(header, 1);
+        put16(header, 32);
+        put32(header, 0);
+        put32(header, imageSize);
+        put32(header, 2835);
+        put32(header, 2835);
+        put32(header, 0);
+        put32(header, 0);
+
+        for (const auto& path : m_pendingCaptures)
+        {
+            FILE* file = nullptr;
+#if defined(_MSC_VER)
+            fopen_s(&file, path.c_str(), "wb");
+#else
+            file = fopen(path.c_str(), "wb");
+#endif
+            if (!file)
+            {
+                continue;
+            }
+            fwrite(header.data(), 1, header.size(), file);
+            fwrite(pixels.data(), 1, pixels.size(), file);
+            fclose(file);
+        }
+        m_pendingCaptures.clear();
     }
 
     bool PlatformLayer::ShouldClose() const

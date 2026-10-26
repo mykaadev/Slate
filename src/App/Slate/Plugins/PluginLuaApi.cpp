@@ -232,7 +232,7 @@ namespace Software::Slate
             return AppPaths::ConfigFile("plugins", plugin.info.manifest.id + ".tsv");
         }
 
-        void EnsureSettingsLoaded(PluginInstance& plugin)
+        void LoadSettingsOnce(PluginInstance& plugin)
         {
             if (plugin.settingsLoaded)
             {
@@ -251,7 +251,7 @@ namespace Software::Slate
             }
         }
 
-        void SaveSettings(const PluginInstance& plugin)
+        void WriteSettings(const PluginInstance& plugin)
         {
             std::ostringstream text;
             for (const auto& [key, value] : plugin.settings)
@@ -265,7 +265,7 @@ namespace Software::Slate
         }
 
         // Values keep their Lua type with a one letter prefix
-        void PushStoredValue(lua_State* L, const std::string& stored)
+        void PushStored(lua_State* L, const std::string& stored)
         {
             if (stored.size() >= 2 && stored[1] == ':')
             {
@@ -978,21 +978,34 @@ namespace Software::Slate
         int L_SettingsGet(lua_State* L)
         {
             PluginInstance& plugin = Self(L);
-            EnsureSettingsLoaded(plugin);
-            const auto it = plugin.settings.find(CheckString(L, 1));
-            if (it == plugin.settings.end())
+            LoadSettingsOnce(plugin);
+            const std::string key = CheckString(L, 1);
+            const auto it = plugin.settings.find(key);
+            if (it != plugin.settings.end())
             {
-                lua_settop(L, 2);
+                PushStored(L, it->second);
                 return 1;
             }
-            PushStoredValue(L, it->second);
+            // An explicit fallback wins; otherwise use the default declared in plugin.json
+            if (lua_isnoneornil(L, 2))
+            {
+                for (const auto& spec : plugin.info.manifest.settings)
+                {
+                    if (spec.key == key)
+                    {
+                        PushStored(L, spec.defaultValue);
+                        return 1;
+                    }
+                }
+            }
+            lua_settop(L, 2);
             return 1;
         }
 
         int L_SettingsSet(lua_State* L)
         {
             PluginInstance& plugin = Self(L);
-            EnsureSettingsLoaded(plugin);
+            LoadSettingsOnce(plugin);
             const std::string key = CheckString(L, 1);
             if (lua_isnoneornil(L, 2))
             {
@@ -1002,7 +1015,7 @@ namespace Software::Slate
             {
                 plugin.settings[key] = StoreValue(L, 2);
             }
-            SaveSettings(plugin);
+            WriteSettings(plugin);
             return 0;
         }
 
@@ -1026,19 +1039,21 @@ namespace Software::Slate
                 {"page_width", "number", "writing column width in pixels, 0 for fluid"},
                 {"live_preview", "boolean", "render markdown in place"},
                 {"heading_scale", "boolean", "draw headings larger than body text"},
-                {"word_wrap", "boolean", "wrap long lines"},
-                {"show_whitespace", "boolean", "show spaces and tabs"},
                 {"highlight_line", "boolean", "highlight the caret line"},
                 {"tab_width", "number", "indent width (2-8)"},
                 {"indent_with_tabs", "boolean", "indent with tab characters"},
                 {"smart_lists", "boolean", "continue lists on enter"},
                 {"link_underline", "boolean", "underline links"},
                 {"paste_images", "boolean", "paste clipboard images as files"},
-                {"side_panels", "number", "0 margins, 1 split"},
-                {"preview_sync", "number", "0 manual, 1 caret, 2 scroll, 3 mixed"},
                 {"panel_motion", "number", "0 instant to 3 floaty"},
                 {"scroll_motion", "number", "0 instant, 1 smooth, 2 glide"},
-                {"caret_motion", "number", "0 crisp, 1 calm, 2 anchored"},
+                {"scrollbar_style", "number", "0 slim, 1 soft, 2 bold"},
+                {"interface_scale", "number", "text size of the whole app in percent (80-150)"},
+                {"start_screen", "number", "0 home, 1 last note, 2 today's journal"},
+                {"boot_sequence", "boolean", "play the boot sequence on launch"},
+                {"status_clock", "boolean", "show the clock in the status bar"},
+                {"cursor_blink", "boolean", "blink the caret and logo cursor"},
+                {"scanlines", "number", "CRT scanlines: 0 off, 1 subtle, 2 strong"},
             };
             return entries;
         }
@@ -1071,6 +1086,13 @@ namespace Software::Slate
             else if (key == "panel_motion") lua_pushinteger(L, editor.panelMotion);
             else if (key == "scroll_motion") lua_pushinteger(L, editor.scrollMotion);
             else if (key == "caret_motion") lua_pushinteger(L, editor.caretMotion);
+            else if (key == "scrollbar_style") lua_pushinteger(L, editor.scrollbarStyle);
+            else if (key == "interface_scale") lua_pushinteger(L, editor.interfaceScale);
+            else if (key == "start_screen") lua_pushinteger(L, editor.startScreen);
+            else if (key == "boot_sequence") lua_pushboolean(L, editor.bootSequence);
+            else if (key == "status_clock") lua_pushboolean(L, editor.statusClock);
+            else if (key == "cursor_blink") lua_pushboolean(L, editor.cursorBlink);
+            else if (key == "scanlines") lua_pushinteger(L, editor.scanlines);
             else return luaL_error(L, "unknown config key: %s", key.c_str());
             return 1;
         }
@@ -1109,6 +1131,13 @@ namespace Software::Slate
             else if (key == "panel_motion") editor.panelMotion = integer();
             else if (key == "scroll_motion") editor.scrollMotion = integer();
             else if (key == "caret_motion") editor.caretMotion = integer();
+            else if (key == "scrollbar_style") editor.scrollbarStyle = integer();
+            else if (key == "interface_scale") editor.interfaceScale = integer();
+            else if (key == "start_screen") editor.startScreen = integer();
+            else if (key == "boot_sequence") editor.bootSequence = boolean();
+            else if (key == "status_clock") editor.statusClock = boolean();
+            else if (key == "cursor_blink") editor.cursorBlink = boolean();
+            else if (key == "scanlines") editor.scanlines = integer();
             else return luaL_error(L, "unknown config key: %s", key.c_str());
 
             std::string error;
@@ -1399,6 +1428,21 @@ require = slate.require
             {
                 registry->RemoveOwner(plugin.info.manifest.id);
             }
+        }
+
+        void EnsureSettingsLoaded(PluginInstance& plugin)
+        {
+            LoadSettingsOnce(plugin);
+        }
+
+        void SaveSettings(const PluginInstance& plugin)
+        {
+            WriteSettings(plugin);
+        }
+
+        void PushStoredValue(lua_State* L, const std::string& stored)
+        {
+            PushStored(L, stored);
         }
     }
 }

@@ -5,5 +5,31 @@
   "description": "Date slash commands and a jump to yesterday's journal",
   "author": "Slate",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    {
+      "key": "date_format",
+      "label": "date format",
+      "type": "choice",
+      "options": [
+        "2026-10-26",
+        "26/10/2026",
+        "10/26/2026",
+        "October 26, 2026"
+      ],
+      "default": "2026-10-26",
+      "description": "what /date inserts"
+    },
+    {
+      "key": "clock",
+      "label": "time format",
+      "type": "choice",
+      "options": [
+        "24 hour",
+        "12 hour"
+      ],
+      "default": "24 hour",
+      "description": "what /time and /stamp insert"
+    }
+  ]
 }

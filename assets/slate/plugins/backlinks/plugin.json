@@ -5,5 +5,24 @@
   "description": "Sidebar panel listing notes that link to the open note",
   "author": "Slate",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    {
+      "key": "snippets",
+      "label": "snippets per note",
+      "type": "number",
+      "default": 2,
+      "min": 0,
+      "max": 6,
+      "step": 1,
+      "description": "lines of context shown under each linking note"
+    },
+    {
+      "key": "mentions",
+      "label": "unlinked mentions",
+      "type": "bool",
+      "default": false,
+      "description": "also list notes that mention the title without linking it"
+    }
+  ]
 }

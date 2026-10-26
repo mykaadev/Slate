@@ -120,8 +120,9 @@ namespace Software::Slate
         bool folderPickerActive = false;
         // Stores the current folder picker action
         FolderPickerAction folderPickerAction = FolderPickerAction::None;
-        // Asks the settings screen to select the plugin section on its next frame
-        bool settingsJumpToPlugins = false;
+        // Asks the settings screen to open a section on its next frame: general, appearance, editor, keys,
+        // plugins, or "plugin <id>" for one plugin's page
+        std::string settingsSection;
         // Stores the page view shown by the view screen
         std::string activeView;
         // Stores sidebar views the user closed; every other sidebar view shows

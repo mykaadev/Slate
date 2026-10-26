@@ -7,6 +7,7 @@
 #include "App/Slate/Markdown/MarkdownService.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/Todos/TodoService.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -37,12 +38,6 @@ namespace Software::Slate
         SlateEditorContext* EditorContext(Software::Core::Runtime::AppContext& context)
         {
             return context.services.Resolve<SlateEditorContext>().get();
-        }
-
-        const char* TodoFilterLabel(int filter)
-        {
-            const int index = std::clamp(filter, 0, static_cast<int>(TodoFilterLabels.size() - 1));
-            return TodoFilterLabels[static_cast<std::size_t>(index)];
         }
 
         const ImVec4& TodoFilterColor(int filter)
@@ -342,72 +337,65 @@ namespace Software::Slate
         }
 
         const ImVec2 size(std::min(760.0f, std::max(420.0f, ImGui::GetWindowWidth() * 0.60f)),
-                          std::min(500.0f, std::max(280.0f, ImGui::GetWindowHeight() * 0.54f)));
+                          std::min(540.0f, std::max(300.0f, ImGui::GetWindowHeight() * 0.58f)));
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
-                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Amber.x, Amber.y, Amber.z, 0.30f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
-        ImGui::BeginChild("TodoOverlay", size, true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+                                   std::max(40.0f, (ImGui::GetWindowHeight() - Tokens::FooterHeight - size.y) * 0.42f)));
+        BeginCard("TodoOverlay", size, Amber, Tokens::SpaceL);
         const bool overlayHovered =
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-        ImGui::TextColored(Amber, "todos");
-        ImGui::SameLine();
-        ImGui::TextColored(TodoFilterColor(m_stateFilter), "%s", TodoFilterLabel(m_stateFilter));
-        ImGui::Dummy(ImVec2(1.0f, 8.0f));
-        ImGui::Separator();
 
-        auto* drawList = ImGui::GetWindowDrawList();
-        const float rowHeight = ImGui::GetTextLineHeightWithSpacing() + 6.0f;
-        const float rowRadius = 6.0f;
-        const float rowInsetX = 4.0f;
-        const ImU32 selectedRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, 0.14f));
-        const ImU32 hoveredRowColor = ImGui::ColorConvertFloat4ToU32(ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.08f));
-
-        auto drawSelectionBackground = [&](const ImVec2& rowStart, float rowWidth, bool selected, bool hovered)
+        // Title on the border, the filters as pills; the active filter is solid
+        const std::string todoCount = std::to_string(m_visibleTodos.size()) + (m_visibleTodos.size() == 1 ? " todo" : " todos");
+        CardTitle("todos", Amber, todoCount.c_str());
         {
-            if (selected || hovered)
+            float pillX = ImGui::GetWindowContentRegionMax().x;
+            for (const char* label : TodoFilterLabels)
             {
-                drawList->AddRectFilled(ImVec2(rowStart.x + rowInsetX, rowStart.y + 1.0f),
-                                        ImVec2(rowStart.x + rowWidth - rowInsetX, rowStart.y + rowHeight - 1.0f),
-                                        selected ? selectedRowColor : hoveredRowColor,
-                                        rowRadius);
+                pillX -= PillWidth(label) + 6.0f;
             }
-        };
+            ImGui::TextColored(TextFaint(), "filter");
+            ImGui::SameLine(pillX);
+            for (int filter = 0; filter < static_cast<int>(TodoFilterLabels.size()); ++filter)
+            {
+                Pill(TodoFilterLabels[static_cast<std::size_t>(filter)], TodoFilterColor(filter), filter == m_stateFilter);
+                ImGui::SameLine(0.0f, 6.0f);
+            }
+            ImGui::NewLine();
+        }
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceXS));
+
+        ImGui::BeginChild("TodoRows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float rowHeight = lineHeight + 14.0f;
+        bool createRequested = false;
 
         {
             const bool selected = m_navigation.Selected() == 0;
-            ImVec2 rowStart = ImGui::GetCursorScreenPos();
-            const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+            ImVec2 rowMin;
+            ImVec2 rowMax;
             ImGui::PushID("TodoNewPinnedRow");
-            ImGui::InvisibleButton("##TodoNewRow", ImVec2(rowWidth, rowHeight));
+            const bool clicked = ListRow("##TodoNewRow", selected, rowHeight, Amber, &rowMin, &rowMax);
             const bool hovered = ImGui::IsItemHovered();
-            if (allowInput && ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            ImGui::PopID();
+            if (allowInput && clicked)
             {
                 m_navigation.SetSelected(0);
             }
             if (allowInput && hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 m_navigation.SetSelected(0);
-                BeginCreate(context, false);
-                ImGui::PopID();
-                return;
+                createRequested = true;
             }
-            ImGui::PopID();
-
-            drawSelectionBackground(rowStart, rowWidth, selected, hovered);
-            const float y = rowStart.y + 4.0f;
-            drawList->AddText(ImVec2(rowStart.x + 18.0f, y),
-                              ImGui::ColorConvertFloat4ToU32(selected ? Green : Amber),
-                              "+ new todo");
+            const float y = rowMin.y + (rowHeight - lineHeight) * 0.5f;
+            drawList->AddText(ImVec2(rowMin.x + 14.0f, y), U32(Amber), "+");
+            drawList->AddText(ImVec2(rowMin.x + 32.0f, y), U32(selected ? Primary : TextSecondary()), "new todo");
         }
 
         if (m_visibleTodos.empty())
         {
-            ImGui::Dummy(ImVec2(1.0f, 6.0f));
-            ImGui::TextColored(Muted, "no todo files yet");
+            ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceM));
+            ImGui::TextColored(TextFaint(), "%s", m_stateFilter == 0 ? "no todos yet" : "nothing here");
         }
         else
         {
@@ -420,24 +408,21 @@ namespace Software::Slate
                 const ImVec4& priorityColor = TodoPriorityColor(todo.priority);
                 if (m_stateFilter == 0 && (!groupStarted || todo.state != currentGroup))
                 {
-                    if (groupStarted)
-                    {
-                        ImGui::Dummy(ImVec2(1.0f, 6.0f));
-                    }
                     currentGroup = todo.state;
                     groupStarted = true;
-                    ImGui::TextColored(stateColor, "%s", MarkdownService::TodoStateLabel(todo.state));
-                    ImGui::Separator();
+                    ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceS));
+                    SectionLabel(MarkdownService::TodoStateLabel(todo.state), stateColor);
                 }
 
                 const std::size_t rowIndex = i + 1;
                 const bool selected = rowIndex == m_navigation.Selected();
-                ImVec2 rowStart = ImGui::GetCursorScreenPos();
-                const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+                ImVec2 rowMin;
+                ImVec2 rowMax;
                 ImGui::PushID(static_cast<int>(rowIndex));
-                ImGui::InvisibleButton("##TodoRow", ImVec2(rowWidth, rowHeight));
+                const bool clicked = ListRow("##TodoRow", selected, rowHeight, stateColor, &rowMin, &rowMax);
                 const bool hovered = ImGui::IsItemHovered();
-                if (allowInput && ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                ImGui::PopID();
+                if (allowInput && clicked)
                 {
                     m_navigation.SetSelected(rowIndex);
                 }
@@ -446,22 +431,42 @@ namespace Software::Slate
                     m_navigation.SetSelected(rowIndex);
                     m_pendingOpenAfterListDraw = true;
                 }
-                ImGui::PopID();
 
-                drawSelectionBackground(rowStart, rowWidth, selected, hovered);
-
-                const float titleX = rowStart.x + 18.0f;
-                const float metaX = rowStart.x + rowWidth - 170.0f;
-                const float y = rowStart.y + 4.0f;
-                drawList->AddText(ImVec2(titleX, y), ImGui::ColorConvertFloat4ToU32(selected ? Green : Primary), todo.title.c_str());
-                drawList->AddText(ImVec2(metaX, y), ImGui::ColorConvertFloat4ToU32(stateColor), MarkdownService::TodoStateLabel(todo.state));
-                drawList->AddText(ImVec2(metaX + 88.0f, y), ImGui::ColorConvertFloat4ToU32(priorityColor), TodoService::PriorityLabel(todo.priority));
+                // State dot, title, then state and priority pills on the right
+                const float y = rowMin.y + (rowHeight - lineHeight) * 0.5f;
+                const bool done = todo.state == TodoState::Done;
+                drawList->AddCircleFilled(ImVec2(rowMin.x + 18.0f, rowMin.y + rowHeight * 0.5f), 3.5f, U32(stateColor));
+                const char* priorityLabel = TodoService::PriorityLabel(todo.priority);
+                const char* stateLabel = MarkdownService::TodoStateLabel(todo.state);
+                const float priorityX = rowMax.x - PillWidth(priorityLabel) - 10.0f;
+                const float stateX = priorityX - PillWidth(stateLabel) - 6.0f;
+                const float pillY = rowMin.y + (rowHeight - PillHeight()) * 0.5f;
+                drawList->PushClipRect(rowMin, ImVec2(stateX - 8.0f, rowMax.y), true);
+                const ImVec4 titleColor = done ? TextFaint() : (selected ? Primary : TextSecondary());
+                drawList->AddText(ImVec2(rowMin.x + 32.0f, y), U32(titleColor), todo.title.c_str());
+                if (done)
+                {
+                    const float width = ImGui::CalcTextSize(todo.title.c_str()).x;
+                    drawList->AddLine(ImVec2(rowMin.x + 32.0f, y + lineHeight * 0.55f),
+                                      ImVec2(rowMin.x + 32.0f + width, y + lineHeight * 0.55f), U32(TextFaint()));
+                }
+                drawList->PopClipRect();
+                if (m_stateFilter != 0)
+                {
+                    DrawPill(drawList, ImVec2(stateX, pillY), stateLabel, stateColor);
+                }
+                DrawPill(drawList, ImVec2(priorityX, pillY), priorityLabel, priorityColor);
             }
         }
 
         ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        EndCard();
+
+        if (createRequested)
+        {
+            BeginCreate(context, false);
+            return;
+        }
 
         if (m_pendingOpenAfterListDraw)
         {
@@ -501,27 +506,23 @@ namespace Software::Slate
         const ImVec2 size(formWidth, formHeight);
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
                                    (ImGui::GetWindowHeight() - size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Amber.x, Amber.y, Amber.z, 0.30f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
-        ImGui::BeginChild("TodoFormOverlay", size, true);
+        BeginCard("TodoFormOverlay", size, Amber, Tokens::SpaceL);
         if (m_form.requestTextFocus)
         {
             ImGui::SetWindowFocus();
         }
         const bool formHovered =
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-        ImGui::TextColored(Amber, "%s", m_form.mode == TodoFormMode::Create ? "new todo" : "edit todo");
-        ImGui::SameLine();
-        ImGui::TextColored(TodoStateColor(m_form.state),
-                           "[%s]",
-                           MarkdownService::TodoStateLabel(m_form.state));
-        ImGui::SameLine();
-        ImGui::TextColored(TodoPriorityColor(m_form.priority),
-                           "[%s]",
-                           TodoService::PriorityLabel(m_form.priority));
+        SectionLabel(m_form.mode == TodoFormMode::Create ? "new todo" : "edit todo", Amber);
+        {
+            const char* stateLabel = MarkdownService::TodoStateLabel(m_form.state);
+            const char* priorityLabel = TodoService::PriorityLabel(m_form.priority);
+            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - PillWidth(stateLabel) - PillWidth(priorityLabel) - 6.0f);
+            Pill(stateLabel, TodoStateColor(m_form.state), true);
+            ImGui::SameLine(0.0f, 6.0f);
+            Pill(priorityLabel, TodoPriorityColor(m_form.priority));
+        }
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceXS));
         ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);
 
         const bool upPressed = ImGui::IsKeyPressed(ImGuiKey_UpArrow, true);
@@ -587,11 +588,9 @@ namespace Software::Slate
         }
         const bool textInputActive = titleActive || descriptionActive || titleFocused || descriptionFocused;
         ImGui::PopItemFlag();
-        ImGui::Separator();
-        DrawShortcutText(helperText, Amber, Primary);
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceXS));
+        DrawShortcutText(helperText, Amber, TextSecondary());
+        EndCard();
 
         if (!textInputActive && !ImGui::IsAnyItemActive())
         {

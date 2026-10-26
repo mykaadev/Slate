@@ -39,6 +39,8 @@ namespace Software::Modes::Slate
         virtual bool WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const;
         virtual void DrawHelp(Software::Core::Runtime::AppContext& context) const;
         virtual void DrawFooterControls(Software::Core::Runtime::AppContext& context);
+        // Short uppercase label for the status bar, for example NOTE or FILES
+        virtual std::string StatusBadge(const Software::Core::Runtime::AppContext& context) const;
 
         Software::Slate::SlateWorkspaceContext& WorkspaceContext(Software::Core::Runtime::AppContext& context) const;
         Software::Slate::SlateEditorContext& EditorContext(Software::Core::Runtime::AppContext& context) const;
@@ -129,6 +131,9 @@ namespace Software::Modes::Slate
         void DrawStatusLine(Software::Core::Runtime::AppContext& context);
         void DrawCommandSuggestions(Software::Core::Runtime::AppContext& context, const ImVec2& promptPos, float width);
         void ProcessShellRequests(Software::Core::Runtime::AppContext& context);
+        void SyncWindowChrome(Software::Core::Runtime::AppContext& context);
+        // Draws the launch sequence: the block logo and a few boot log lines, then fades out
+        void DrawBootSequence(Software::Core::Runtime::AppContext& context, double age);
         std::string HelperText(const Software::Core::Runtime::AppContext& context) const;
         void HandleGlobalKeys(Software::Core::Runtime::AppContext& context);
         void OpenSearchResult(const Software::Slate::SearchOverlaySelection& selection, Software::Core::Runtime::AppContext& context);
@@ -140,6 +145,7 @@ namespace Software::Modes::Slate
         double m_statusSeconds = 0.0;
         double m_nowSeconds = 0.0;
         bool m_statusIsError = false;
+        ImVec4 m_chromeColor{-1.0f, -1.0f, -1.0f, 1.0f};
         bool m_searchOverlayOpen = false;
         bool m_workspaceOverlayOpen = false;
         bool m_helpOpen = false;

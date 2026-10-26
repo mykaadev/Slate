@@ -36,6 +36,12 @@ namespace Software::Slate::Live
         bool acceptInput = true;
         // Max width of the writing column; 0 fills the area
         float pageWidth = 0.0f;
+        // Blinks the caret after a pause in typing
+        bool caretBlink = true;
+        // Underlines links
+        bool linkUnderline = true;
+        // Caret-follow scrolling: 0 instant, 1 smooth, 2 glide
+        int scrollMotion = 1;
     };
 
     // What the editor asks the app to do
@@ -208,6 +214,8 @@ namespace Software::Slate::Live
         float m_contentHeight = 0.0f;
         float m_viewHeight = 0.0f;
         float m_scrollY = 0.0f;
+        // Where caret-follow scrolling is easing to, or negative when idle
+        float m_scrollTarget = -1.0f;
         float m_lineHeight = 20.0f;
         float m_columnX = 0.0f;
         float m_desiredX = -1.0f;

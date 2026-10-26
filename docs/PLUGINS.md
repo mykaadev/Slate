@@ -1,6 +1,6 @@
 # Slate plugins and mods
 
-Slate plugins are small Lua 5.4 scripts. A plugin can add commands, slash commands, home screen entries, status line text, key bindings, and themes. It can also react to app events and edit the open note.
+Slate plugins are small Lua 5.4 scripts. A plugin can add commands, slash commands, home screen entries, status line text, key bindings, and themes. It can draw its own screens and sidebar panels, react to app events, and edit notes and todos.
 
 Each plugin runs in its own sandboxed Lua state. A broken plugin shows an error in **config → plugins** and leaves the rest of Slate running.
 
@@ -45,11 +45,20 @@ my-plugin/
   "description": "One line about what it does",
   "author": "you",
   "main": "main.lua",
-  "api": 1
+  "api": 1,
+  "settings": [
+    { "key": "loud", "label": "loud mode", "type": "bool", "default": false,
+      "description": "shout every greeting" },
+    { "key": "speed", "label": "speed", "type": "number", "default": 220, "min": 100, "max": 400, "step": 20 },
+    { "key": "style", "label": "style", "type": "choice", "options": ["calm", "wild"], "default": "calm" },
+    { "key": "name", "label": "your name", "type": "text", "default": "" }
+  ]
 }
 ```
 
 If there is no `plugin.json`, the folder name is the id and `main.lua` is the entry.
+
+**Settings.** Each entry in `settings` becomes a row on the plugin's own page in settings (`settings > plugins > enter`). Types are `bool`, `number` (with `min`, `max`, `step`), `choice` (with `options`), and `text`. `slate.settings.get(key)` returns the user's value, or the `default` from `plugin.json`. When the user changes a value, the plugin gets a `settings_changed` event.
 
 **Mods without code.** A plugin that only ships `themes/` adds new palettes. Pick them in config, or call `slate.config.set("shell_theme", "<id>")`. See the bundled `phosphor-theme`.
 
@@ -90,6 +99,7 @@ All APIs live on the global `slate` table. Paths are workspace-relative with `/`
 | `document_change` | `path` | After typing pauses (debounced about 0.3 s) |
 | `document_before_save` | `path, text` | Return a string to replace what gets written |
 | `document_save` | `path` | After a note was written |
+| `settings_changed` | `key, value` | The user changed one of this plugin's settings |
 | `unload` | | Before the plugin is disabled or reloaded |
 | `quit` | | Slate is closing |
 
@@ -163,12 +173,70 @@ To change the open note, use `slate.editor.set_text`. If you write the open note
 ```lua
 slate.settings.set("greeting", "hi")         -- per plugin, persisted in config/plugins/<id>.tsv
 slate.settings.get("greeting", "default")    -- strings, numbers, and booleans keep their type
+slate.settings.get("speed")                  -- falls back to the default declared in plugin.json
+slate.on("settings_changed", function(key, value) redraw() end)
 
 slate.config.set("font_size", 16)            -- app settings, same as the config screen
 slate.config.get("live_preview")
 for _, k in ipairs(slate.config.keys()) do slate.log(k.key, k.type, k.description) end
 slate.theme.list()                           -- { shell = {...}, markdown = {...} }
 ```
+
+### Views: screens and sidebar panels
+
+A view is a function that draws UI every frame. A `page` view is a full screen (open it with `slate.view.open(id)` or `:view <id>`). A `sidebar` view is a panel on the right of the note screen (`ctrl+shift+b` toggles the sidebar; `:panel <id>` hides or shows one panel).
+
+```lua
+slate.view.register {
+  id = "stats",
+  title = "Stats",
+  location = "page",               -- or "sidebar"
+  draw = function(ui, width, height)
+    ui.heading("Workspace stats")
+    ui.text(#slate.workspace.files() .. " notes", "muted")
+    if ui.button("open today") then slate.command.run("today") end
+  end,
+}
+```
+
+The `ui` table uses Slate's own fonts and theme colors. Color names: `primary`, `muted`, `cyan`, `amber`, `green`, `red`, `panel`, `background`, `link`, `heading1`, `heading2`, `heading3`, `code`, `bullet`, `image`.
+
+| Function | Description |
+| --- | --- |
+| `ui.text(s, color \| {color, wrap})` / `ui.muted(s)` | Text, wrapped by default |
+| `ui.heading(s, level)` | A heading at the editor's heading sizes |
+| `ui.markdown(s)` | Markdown rendered by the same renderer as the editor |
+| `ui.button(label, {color, width})` | Returns `true` when clicked |
+| `ui.link(label, {color})` | Text link; returns `true` when clicked |
+| `ui.card{id, title, body, accent, badge, badge_color, selected, drag_type, drag_payload, width}` | Returns `"click"`, `"double"`, `"right"`, or `nil` |
+| `ui.drop_target(type)` | After a card or panel: returns the dropped payload, or `nil` |
+| `ui.dragging(type)` | `true` while something of that type is being dragged |
+| `ui.begin_panel(id, w, h, {background, border, highlight, padding})` / `ui.end_panel()` | A scrollable region; 0 means "fill" |
+| `ui.input(id, text, hint)` | Returns `text, submitted` |
+| `ui.checkbox(label, value)` | Returns `value, changed` |
+| `ui.badge(text, color)`, `ui.progress(fraction, color)` | Small status pieces |
+| `ui.same_line(gap)`, `ui.space(px)`, `ui.dummy(w, h)`, `ui.separator()` | Layout |
+| `ui.width()`, `ui.height()` | Space left in the current region |
+| `ui.tooltip(text)`, `ui.hovered()` | About the last item |
+| `ui.key("n")` | `true` when the chord was pressed this frame |
+
+If a view's `draw` raises an error, the view shows the error and stops running until the plugin reloads.
+
+### Todos
+
+Todos are Markdown files in `Todos/` with `status:` and `priority:` frontmatter.
+
+```lua
+for _, todo in ipairs(slate.todos.list()) do
+  -- todo.path, todo.title, todo.description, todo.state, todo.priority, todo.tags
+end
+local path = slate.todos.create { title = "Write docs", state = "open", priority = "high" }
+slate.todos.update(path, { state = "doing" })   -- also title, description, priority
+slate.todos.delete(path)
+slate.todos.states()                            -- { "open", "research", "doing", "done" }
+```
+
+Priorities: `low`, `normal`, `high`, `urgent`.
 
 ### Prompts
 
@@ -181,7 +249,8 @@ slate.ui.confirm("delete it?", function(ok) if ok then ... end end)
 
 | Command | Action |
 | --- | --- |
-| `:plugins` | Open the plugin list in config (`enter` toggles a plugin) |
+| `:plugins` | Open the plugin list in settings: `space` turns a plugin on or off, `enter` opens its settings page |
+| `:settings plugin <id>` | Open one plugin's settings page |
 | `:reload [id]` | Rediscover folders and reload all plugins, or one plugin |
 | `:plugin new <name>` | Make a starter plugin |
 | `:plugin folder` | Open your plugin folder |
@@ -190,9 +259,12 @@ slate.ui.confirm("delete it?", function(ok) if ok then ... end end)
 
 Slate saves your enable and disable choices in `%APPDATA%/Slate/config/plugins/enabled.tsv`.
 
-## Bundled examples
+## Bundled plugins
 
-- **word-count**: status line word count and reading time. Adds `:wc`.
-- **daily-tools**: `/date`, `/time`, and `/stamp` slash commands, plus `:yesterday` and a home entry.
-- **editing-tools**: `ctrl+enter` toggles tasks, `:sort` sorts selected lines, and `:trim-on-save` uses the save hook.
+- **kanban**: a drag-and-drop board over your todo documents. Press `k` on home or run `:kanban`. Right-click a card to change its priority. Settings: sort order, done column, progress bar, card details.
+- **backlinks**: sidebar panel listing notes that link to the open note. Settings: snippets per note, unlinked mentions.
+- **calendar**: sidebar month calendar. Green days have journal entries; click a day to open or create it. Settings: week start, entry count.
+- **word-count**: status line word count and reading time. Adds `:wc`. Settings: reading time, reading speed, characters.
+- **daily-tools**: `/date`, `/time`, and `/stamp` slash commands, plus `:yesterday` and a home entry. Settings: date and time format.
+- **editing-tools**: `ctrl+enter` toggles tasks, `:sort` sorts selected lines, and trim on save uses the save hook. Settings: trim on save, case-sensitive sort.
 - **phosphor-theme**: a mod that only ships a green terminal palette.

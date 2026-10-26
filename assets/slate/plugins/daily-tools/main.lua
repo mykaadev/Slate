@@ -1,13 +1,31 @@
 -- Date helpers for journaling.
 
+local date_formats = {
+  ["2026-10-26"] = "%Y-%m-%d",
+  ["26/10/2026"] = "%d/%m/%Y",
+  ["10/26/2026"] = "%m/%d/%Y",
+  ["October 26, 2026"] = "%B %d, %Y",
+}
+
+local function today()
+  return os.date(date_formats[slate.settings.get("date_format")] or "%Y-%m-%d")
+end
+
+local function now()
+  if slate.settings.get("clock") == "12 hour" then
+    return (os.date("%I:%M %p"):gsub("^0", ""))
+  end
+  return os.date("%H:%M")
+end
+
 slate.slash.register { id = "date", label = "date", description = "Insert today's date",
-  run = function() return os.date("%Y-%m-%d") end }
+  run = function() return today() end }
 
 slate.slash.register { id = "time", label = "time", description = "Insert the current time",
-  run = function() return os.date("%H:%M") end }
+  run = function() return now() end }
 
 slate.slash.register { id = "stamp", label = "timestamp", description = "Insert a dated log line",
-  run = function() return "- " .. os.date("%H:%M") .. " — " end }
+  run = function() return "- " .. now() .. " — " end }
 
 local function journal_path_for(offset_days)
   local t = os.time() + offset_days * 24 * 60 * 60

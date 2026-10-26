@@ -4,9 +4,13 @@
 #include "App/Slate/Extensions/SlateExtensionRegistry.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
+
+#include <algorithm>
+#include <cctype>
 
 namespace Software::Modes::Slate
 {
@@ -38,23 +42,33 @@ namespace Software::Modes::Slate
             return;
         }
 
-        ImGui::TextColored(Cyan, "%s", view->title.c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(Muted, "  %s", view->owner.c_str());
-        auto* drawList = ImGui::GetWindowDrawList();
-        const ImVec2 lineStart(ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x, ImGui::GetCursorScreenPos().y + 4.0f);
-        drawList->AddLine(lineStart,
-                          ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x, lineStart.y),
-                          ImGui::ColorConvertFloat4ToU32(ImVec4(Muted.x, Muted.y, Muted.z, 0.18f)), 1.0f);
-        ImGui::Dummy(ImVec2(1.0f, 12.0f));
+        // Header: view title, plus the owning plugin when it adds information
+        std::string owner = "plugin " + view->owner;
+        std::string lowerTitle = view->title;
+        std::transform(lowerTitle.begin(), lowerTitle.end(), lowerTitle.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (view->owner.empty() || view->owner == lowerTitle)
+        {
+            owner.clear();
+        }
+        ScreenHeader(view->title.c_str(), nullptr, owner.c_str(), MarkdownImage);
 
         const ImVec2 available = ImGui::GetContentRegionAvail();
-        const float height = std::max(1.0f, available.y - 46.0f);
+        const float height = std::max(1.0f, available.y - Tokens::FooterHeight + 20.0f);
         ImGui::BeginChild("PluginPageView", ImVec2(available.x, height), false, ImGuiWindowFlags_NoBackground);
         // Copy the callback: the view may re-register itself while drawing
         const auto draw = view->draw;
         draw(available.x, height);
         ImGui::EndChild();
+    }
+
+    std::string SlateViewMode::StatusBadge(const Software::Core::Runtime::AppContext& context) const
+    {
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        const auto registry = mutableContext.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+        const auto* view = registry ? registry->FindView(UiState(mutableContext).activeView) : nullptr;
+        std::string badge = view ? view->title : std::string("VIEW");
+        std::transform(badge.begin(), badge.end(), badge.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+        return badge;
     }
 
     std::string SlateViewMode::ModeHelperText(const Software::Core::Runtime::AppContext& context) const

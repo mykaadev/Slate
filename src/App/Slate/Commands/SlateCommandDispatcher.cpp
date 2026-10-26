@@ -162,7 +162,7 @@ namespace Software::Slate
             {
                 return MissingHandler(id);
             }
-            handlers.showSettings();
+            handlers.showSettings(arguments);
             return SlateCommandDispatchResult::Success(id);
         }
 
@@ -209,6 +209,26 @@ namespace Software::Slate
             return handlers.openWorkspace(arguments)
                        ? SlateCommandDispatchResult::Success(id)
                        : SlateCommandDispatchResult::Failure(id, "could not open workspace: " + arguments);
+        }
+
+        if (id == "slate.help.show")
+        {
+            if (!handlers.showHelp)
+            {
+                return MissingHandler(id);
+            }
+            handlers.showHelp();
+            return SlateCommandDispatchResult::Success(id);
+        }
+
+        if (id == "slate.palette.show")
+        {
+            if (!handlers.showPalette)
+            {
+                return MissingHandler(id);
+            }
+            handlers.showPalette();
+            return SlateCommandDispatchResult::Success(id);
         }
 
         const auto result = context.commands.ExecuteById(id, arguments, context);

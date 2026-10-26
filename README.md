@@ -109,14 +109,17 @@ The goal is not to be an Obsidian clone, a cloud workspace, or a giant knowledge
 | Feature | What it does |
 | --- | --- |
 | **Local-first Markdown workspace** | Notes live as regular `.md` files in folders you control. |
-| **Live preview editing** | Markdown renders in place as you write. Syntax shows only on the line you are editing, like Obsidian. |
-| **Markdown preview + outline** | Open a rendered side preview with images, and a heading outline. |
+| **Live preview editing** | Markdown renders in place as you write. Syntax shows only on the line or block you are editing, like Obsidian. |
+| **Rich blocks** | Callouts (foldable), real tables with alignment, syntax-highlighted code, properties, images, math, and clickable checkboxes. |
+| **Reading view + outline** | `ctrl+p` shows the note fully rendered; `ctrl+o` opens a heading outline beside it. |
+| **File preview** | The file tree shows a rendered preview of the selected note. |
 | **File tree + library views** | Move through nested folders with a quiet, rail-based tree view. |
 | **Workspace search** | Search file names, note text, and recent files. |
 | **Inline slash commands** | Type `/todo`, `/table`, `/callout`, `/image`, and more while writing. |
 | **Bindable shortcuts** | Helper text follows the active shortcut bindings. |
 | **Command palette** | `ctrl+shift+p` or `:` lists every command, built-in or plugin, with tab completion. |
-| **Lua plugins and mods** | Add commands, slash commands, home entries, status items, key bindings, and themes. See [docs/PLUGINS.md](docs/PLUGINS.md). |
+| **Lua plugins and mods** | Add commands, slash commands, screens, sidebar panels, home entries, status items, key bindings, and themes. See [docs/PLUGINS.md](docs/PLUGINS.md). |
+| **Base plugins** | A Kanban board over your todos, backlinks and calendar panels, word count, date tools, and editing helpers ship enabled. |
 
 </div>
 
@@ -165,6 +168,25 @@ The goal is not to be an Obsidian clone, a cloud workspace, or a giant knowledge
 | 3 | Start writing Markdown files. |
 | 4 | Open today’s journal when you need a daily note. |
 | 5 | Use search, the file tree, slash commands, and todos when they help. |
+
+</div>
+
+### Editor shortcuts
+
+<div align="center">
+
+| Default | Action |
+| --- | --- |
+| `ctrl+b` / `ctrl+i` / `ctrl+e` | bold / italic / inline code (wraps the selection) |
+| `ctrl+k` | insert a link |
+| `ctrl+z` / `ctrl+y` | undo / redo |
+| `alt+up` / `alt+down` | move lines |
+| `tab` / `shift+tab` | indent / outdent list items |
+| `ctrl+enter` | toggle a task (editing-tools plugin) |
+| `ctrl+p` | reading view |
+| `ctrl+shift+b` | sidebar panels |
+| `ctrl+shift+p` | command palette |
+| `/` | block and plugin slash commands |
 
 </div>
 
@@ -381,6 +403,20 @@ Slate keeps configuration plain, small, and separated by responsibility.
 <div align="center">
   <img src="https://github.com/mykaadev/Slate/blob/main/resources/settings.png" width="700" alt="Slate settings view" />
 </div>
+
+### Settings screen
+
+Press `c` on home, or run `:settings`. The screen has five sections; `tab` or `1`-`5` switches between them.
+
+| Section | What you set |
+| --- | --- |
+| general | start screen (home, last note, today's journal), boot sequence, status bar clock, workspace, `init.lua`, reset |
+| appearance | shell palette, markdown accents, font (any installed monospace font), interface size, cursor blink, CRT scanlines, scrollbars, link underline |
+| editor | live preview, heading scale, font size, line spacing, page width, smart lists, indentation, scroll and panel motion, caret line, images |
+| keys | every shortcut; `enter` rebinds it |
+| plugins | every plugin: `space` turns it on or off, `enter` opens its page with its own settings |
+
+`:settings <section>` opens a section directly, and `:settings plugin <id>` opens one plugin's page.
 
 ### App config
 

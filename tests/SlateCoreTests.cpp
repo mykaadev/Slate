@@ -15,6 +15,9 @@
 #include "App/Slate/Workspace/WorkspaceTree.h"
 #include "App/Slate/Core/SlateEvents.h"
 #include "App/Slate/Editor/LivePreviewLexer.h"
+#include "App/Slate/Editor/Live/CodeHighlighter.h"
+#include "App/Slate/Editor/Live/MarkdownBlocks.h"
+#include "App/Slate/Editor/Live/TextBuffer.h"
 #include "App/Slate/Extensions/SlateExtensionRegistry.h"
 #include "App/Slate/Extensions/SlateShellBridge.h"
 #include "App/Slate/Plugins/PluginManager.h"
@@ -556,7 +559,7 @@ namespace
         CHECK(theme.Load(&loaded));
         CHECK(loaded.shellPreset == "custom-shell");
         CHECK(loaded.markdownPreset == "custom-markdown");
-        CHECK(fs::exists(root / ".slate" / "theme.tsv"));
+        CHECK(fs::exists(theme.SettingsPath()));
         fs::remove_all(root);
     }
 
@@ -632,6 +635,12 @@ namespace
         settings.indentWithTabs = true;
         settings.autoListContinuation = false;
         settings.pasteClipboardImages = false;
+        settings.interfaceScale = 125;
+        settings.startScreen = 2;
+        settings.bootSequence = false;
+        settings.statusClock = false;
+        settings.cursorBlink = false;
+        settings.scanlines = 9;
         CHECK(settingsService.Save(settings));
 
         Software::Slate::EditorSettings loaded;
@@ -654,8 +663,111 @@ namespace
         CHECK(loaded.indentWithTabs);
         CHECK(!loaded.autoListContinuation);
         CHECK(!loaded.pasteClipboardImages);
-        CHECK(fs::exists(root / ".slate" / "editor.tsv"));
+        CHECK(loaded.interfaceScale == 125);
+        CHECK(loaded.startScreen == 2);
+        CHECK(!loaded.bootSequence);
+        CHECK(!loaded.statusClock);
+        CHECK(!loaded.cursorBlink);
+        CHECK(loaded.scanlines == 2);
+        CHECK(fs::exists(settingsService.SettingsPath()));
         fs::remove_all(root);
+    }
+
+    void TestTextBufferEditing()
+    {
+        using Software::Slate::Live::EditKind;
+        using Software::Slate::Live::Selection;
+        Software::Slate::Live::TextBuffer buffer;
+        buffer.SetText("one\r\ntwo\rthree");
+        CHECK(buffer.Text() == "one\ntwo\nthree");
+        CHECK(buffer.LineCount() == 3);
+        CHECK(buffer.Line(1) == "two");
+        CHECK(buffer.LineOfOffset(5) == 1);
+        CHECK(buffer.TextWithLineEnding("\r\n") == "one\r\ntwo\r\nthree");
+
+        // Typing merges into one undo step; a newline or pause starts a new one
+        buffer.Replace(3, 3, "!", Selection::At(3), Selection::At(4), EditKind::Typing, 1.0);
+        buffer.Replace(4, 4, "!", Selection::At(4), Selection::At(5), EditKind::Typing, 1.1);
+        CHECK(buffer.Line(0) == "one!!");
+        Selection selection;
+        CHECK(buffer.Undo(&selection));
+        CHECK(buffer.Line(0) == "one");
+        CHECK(selection.caret == 3);
+        CHECK(buffer.Redo(&selection));
+        CHECK(buffer.Line(0) == "one!!");
+
+        // Word motion skips punctuation runs and whitespace
+        buffer.SetText("hello, world");
+        CHECK(buffer.NextWord(0) == 5);
+        CHECK(buffer.PrevWord(12) == 7);
+        // UTF-8 code points move as one unit
+        buffer.SetText("a\xc3\xa9" "b");
+        CHECK(buffer.NextChar(1) == 3);
+        CHECK(buffer.PrevChar(3) == 1);
+    }
+
+    void TestMarkdownBlocks()
+    {
+        using namespace Software::Slate::Live;
+        const std::vector<std::string_view> lines{
+            "---", "tags: [a]", "---",
+            "# Title",
+            "```lua", "print(1)", "```",
+            "| a | b |", "| :- | -: |", "| 1 | 2 |",
+            "> [!warning]- Careful", "> body",
+            "plain",
+            "$$", "x", "$$",
+        };
+        const auto blocks = ParseBlocks(lines);
+        CHECK(blocks.size() == 7);
+        CHECK(blocks[0].kind == BlockKind::Frontmatter && blocks[0].lastLine == 2);
+        CHECK(blocks[1].kind == BlockKind::Line && blocks[1].firstLine == 3);
+        CHECK(blocks[2].kind == BlockKind::Code && blocks[2].language == "lua" && blocks[2].lastLine == 6);
+        CHECK(blocks[3].kind == BlockKind::Table && blocks[3].firstLine == 7 && blocks[3].lastLine == 9);
+        CHECK(blocks[4].kind == BlockKind::Callout && blocks[4].calloutType == "warning" && blocks[4].calloutFold == '-');
+        CHECK(blocks[4].calloutTitle == "Careful" && blocks[4].lastLine == 11);
+        CHECK(blocks[6].kind == BlockKind::Math && blocks[6].lastLine == 15);
+
+        const auto cells = SplitTableRow("| a | b \\| c |  |");
+        CHECK(cells.size() == 3);
+        CHECK(cells[1].text == "b \\| c");
+        CHECK(cells[2].text.empty());
+        const auto aligns = TableAlignments("| :- | :-: | -: |");
+        CHECK(aligns.size() == 3 && aligns[0] == TableAlign::Left && aligns[1] == TableAlign::Center &&
+              aligns[2] == TableAlign::Right);
+
+        // An unclosed fence runs to the end of the document
+        const std::vector<std::string_view> open{"```", "code"};
+        const auto unclosed = ParseBlocks(open);
+        CHECK(unclosed.size() == 1 && unclosed[0].unclosed && unclosed[0].lastLine == 1);
+    }
+
+    void TestCodeHighlighter()
+    {
+        using namespace Software::Slate::Live;
+        int state = 0;
+        const std::string line = "local x = \"hi\" -- note";
+        const auto tokens = HighlightCodeLine("lua", line, &state);
+        CHECK(tokens[0] == CodeToken::Keyword);
+        CHECK(tokens[line.find('"')] == CodeToken::String);
+        CHECK(tokens[line.find("--")] == CodeToken::Comment);
+
+        // Block comments carry across lines
+        state = 0;
+        HighlightCodeLine("cpp", "int a; /* start", &state);
+        CHECK(state != 0);
+        const auto next = HighlightCodeLine("cpp", "still */ return 1;", &state);
+        CHECK(state == 0);
+        CHECK(next[0] == CodeToken::Comment);
+        CHECK(next[std::string("still */ return 1;").find("return")] == CodeToken::Keyword);
+
+        // JSON keys are properties, values are strings
+        state = 0;
+        const std::string json = "{\"name\": \"slate\"}";
+        const auto jsonTokens = HighlightCodeLine("json", json, &state);
+        CHECK(jsonTokens[1] == CodeToken::Property);
+        CHECK(jsonTokens[json.rfind("slate")] == CodeToken::String);
+        CHECK(!IsKnownCodeLanguage("klingon"));
     }
 
     void TestLivePreviewStyling()
@@ -728,7 +840,11 @@ namespace
         setenv("APPDATA", root.string().c_str(), 1);
 #endif
         WriteFile(root / "Slate" / "plugins" / "test-plugin" / "plugin.json",
-                  R"({"id": "test-plugin", "name": "Test Plugin", "version": "1.2.3"})");
+                  R"({"id": "test-plugin", "name": "Test Plugin", "version": "1.2.3", "settings": [
+                      {"key": "loud", "type": "bool", "default": true},
+                      {"key": "speed", "type": "number", "default": 220, "min": 100, "max": 400, "step": 20},
+                      {"key": "mode", "type": "choice", "options": ["calm", "wild"], "default": "wild"},
+                      {"key": "broken", "type": "nonsense"}]})");
         WriteFile(root / "Slate" / "plugins" / "test-plugin" / "helper.lua", "return { answer = 42 }\n");
         WriteFile(root / "Slate" / "plugins" / "test-plugin" / "main.lua", R"lua(
 assert(io == nil and dofile == nil and os.execute == nil, "sandbox leaked")
@@ -740,6 +856,9 @@ slate.status.set("state", "ready")
 slate.settings.set("count", 3)
 assert(slate.settings.get("count") == 3)
 slate.on("document_before_save", function(path, text) return text .. "!" end)
+assert(slate.settings.get("loud") == true and slate.settings.get("speed") == 220 and slate.settings.get("mode") == "wild")
+assert(slate.settings.get("missing", "fallback") == "fallback")
+slate.on("settings_changed", function(key, value) slate.status.set("changed", key .. "=" .. tostring(value)) end)
 )lua");
         WriteFile(root / "Slate" / "plugins" / "spin" / "main.lua", "while true do end\n");
 
@@ -778,6 +897,28 @@ slate.on("document_before_save", function(path, text) return text .. "!" end)
         }
         CHECK(sawTest && sawSpin);
 
+        // Declared settings: defaults, changes, the change event, and reset
+        for (const auto& plugin : plugins.Plugins())
+        {
+            if (plugin.manifest.id == "test-plugin")
+            {
+                CHECK(plugin.manifest.settings.size() == 3);
+            }
+        }
+        CHECK(plugins.SettingValue("test-plugin", "speed") == "n:220");
+        CHECK(plugins.SetSetting("test-plugin", "mode", Software::Slate::PluginManager::StoredText("calm")));
+        CHECK(Software::Slate::PluginManager::StoredAsText(plugins.SettingValue("test-plugin", "mode")) == "calm");
+        bool sawChange = false;
+        for (const auto& item : registry->StatusItems())
+        {
+            sawChange = sawChange || item.text == "mode=calm";
+        }
+        CHECK(sawChange);
+        CHECK(plugins.ResetSettings("test-plugin"));
+        CHECK(Software::Slate::PluginManager::StoredAsText(plugins.SettingValue("test-plugin", "mode")) == "wild");
+        CHECK(Software::Slate::PluginManager::StoredAsNumber("n:12.5") == 12.5);
+        CHECK(Software::Slate::PluginManager::StoredAsBool(Software::Slate::PluginManager::StoredBool(true)));
+
         const auto result = commands.Execute("greet bob", context);
         CHECK(result.succeeded && result.message == "hi bob");
         Software::Core::Runtime::CommandRequest request;
@@ -787,7 +928,12 @@ slate.on("document_before_save", function(path, text) return text .. "!" end)
         CHECK(slash != nullptr);
         std::string replacement;
         CHECK(slash->run(&replacement, nullptr) && replacement == "42");
-        CHECK(!registry->StatusItems().empty() && registry->StatusItems().front().text == "ready");
+        bool sawReady = false;
+        for (const auto& item : registry->StatusItems())
+        {
+            sawReady = sawReady || item.text == "ready";
+        }
+        CHECK(sawReady);
 
         std::string text = "note";
         events.Publish(Software::Slate::Events::DocumentWillSave{"a.md", &text});
@@ -806,6 +952,9 @@ slate.on("document_before_save", function(path, text) return text .. "!" end)
 
 int main()
 {
+    TestTextBufferEditing();
+    TestMarkdownBlocks();
+    TestCodeHighlighter();
     TestLivePreviewStyling();
     TestLuaPlugins();
     TestWorkspaceScan();

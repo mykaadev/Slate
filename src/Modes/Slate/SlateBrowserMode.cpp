@@ -6,6 +6,7 @@
 #include "App/Slate/Core/SlateModeIds.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -157,9 +158,8 @@ namespace Software::Modes::Slate
             const float rowWidth = std::min(620.0f, ImGui::GetContentRegionAvail().x);
             SetCursorCenteredForWidth(rowWidth);
             ImGui::BeginGroup();
-            ImGui::TextColored(Amber, "(%s)", WorkspaceContext(context).Shortcuts().Label(Software::Slate::ShortcutAction::BrowserFilter).c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(Primary, "filter");
+            Software::Slate::UI::KeyHint(WorkspaceContext(context).Shortcuts().Label(Software::Slate::ShortcutAction::BrowserFilter),
+                                         "filter", Amber);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(std::max(220.0f, rowWidth - 92.0f));
             if (ui.focusFilter)
@@ -842,21 +842,18 @@ namespace Software::Modes::Slate
         const char* title = ui.browserView == Software::Slate::SlateBrowserView::Library
                                 ? "library"
                                 : (movePicker ? "move to folder" : (folderPicker ? "choose folder" : "file tree"));
-        ImGui::TextColored(Cyan, "%s", title);
-        if (!ui.filterText.empty())
-        {
-            ImGui::SameLine();
-            ImGui::TextColored(Amber, " filter: %s", ui.filterText.c_str());
-        }
+        const std::string filter = ui.filterText.empty() ? std::string() : "filter: " + ui.filterText;
+        const std::string count = std::to_string(ui.treeRows.size()) + (ui.treeRows.size() == 1 ? " entry" : " entries");
+        Software::Slate::UI::ScreenHeader(title, filter.c_str(), count.c_str(), folderPicker ? Amber : Cyan);
         if (movePicker)
         {
-            ImGui::TextColored(Muted, "moving: %s", ui.pendingPath.generic_string().c_str());
+            ImGui::TextColored(Software::Slate::UI::TextFaint(), "moving %s", ui.pendingPath.generic_string().c_str());
+            ImGui::Dummy(ImVec2(1.0f, Software::Slate::UI::Tokens::SpaceXS));
         }
-        ImGui::Separator();
 
         if (ui.treeRows.empty())
         {
-            ImGui::TextColored(Muted, "no matching entries");
+            ImGui::TextColored(Software::Slate::UI::TextFaint(), "no matching entries");
             ImGui::EndChild();
             return;
         }

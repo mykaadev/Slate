@@ -3,6 +3,7 @@
 #include "App/Slate/Core/SlateModeIds.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -153,60 +154,105 @@ namespace Software::Modes::Slate
 
     void SlateWorkspaceMode::DrawWorkspaceSetup(Software::Core::Runtime::AppContext& context)
     {
-        ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.18f));
-        TextCentered("Slate", Cyan);
-        ImGui::Spacing();
-        TextCentered("no workspace yet", Amber);
-        ImGui::Dummy(ImVec2(1.0f, 28.0f));
-        TextCentered("create a local markdown workspace to begin", Primary);
-        ImGui::Dummy(ImVec2(1.0f, 24.0f));
+        using namespace Software::Slate::UI;
+        ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.16f));
+        BlockLogo(std::clamp(ImGui::GetWindowHeight() / 70.0f, 7.0f, 13.0f), context.frame.elapsedSeconds);
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceS));
+        TextCentered("notes, todos and a journal in plain markdown", TextSecondary());
+        ImGui::Dummy(ImVec2(1.0f, Tokens::Space2XL));
 
-        const float columnWidth = 360.0f;
-        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - columnWidth) * 0.5f);
-        ImGui::BeginGroup();
+        // Welcome card: what a workspace is and how to start one
+        const float cardWidth = std::min(460.0f, ImGui::GetWindowWidth() - 48.0f);
         const auto& shortcuts = WorkspaceContext(context).Shortcuts();
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::WorkspaceNew).c_str(), "new");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::CommandPalette).c_str(), "command");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Quit).c_str(), "quit");
-        ImGui::EndGroup();
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float rowHeight = std::max(lineHeight, KeycapHeight()) + 8.0f;
+        const ImVec2 size(cardWidth, Tokens::SpaceL * 2.0f + lineHeight * 3.0f + rowHeight * 3.0f + Tokens::SpaceM * 2.0f);
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - cardWidth) * 0.5f);
+        BeginCard("WorkspaceWelcome", size, Cyan);
+        CardTitle("start a workspace", Cyan);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(TextFaint(), "a workspace is a folder of markdown files on your disk");
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceS));
+        auto action = [&](Software::Slate::ShortcutAction shortcut, const char* label, const ImVec4& accent) {
+            const ImVec2 start = ImGui::GetCursorScreenPos();
+            const std::string key = shortcuts.Label(shortcut);
+            auto* drawList = ImGui::GetWindowDrawList();
+            DrawKeycap(drawList, ImVec2(start.x, start.y + (rowHeight - KeycapHeight()) * 0.5f), key, accent);
+            drawList->AddText(ImVec2(start.x + KeycapWidth("ctrl+k") + 10.0f, start.y + (rowHeight - lineHeight) * 0.5f),
+                              U32(Primary), label);
+            ImGui::Dummy(ImVec2(1.0f, rowHeight));
+        };
+        action(Software::Slate::ShortcutAction::WorkspaceNew, "create a new workspace", Green);
+        action(Software::Slate::ShortcutAction::CommandPalette, "run a command", Cyan);
+        action(Software::Slate::ShortcutAction::Quit, "quit", Muted);
+        EndCard();
 
         const std::string defaultPath =
-            "default: " + Software::Slate::WorkspaceRegistryService::DefaultWorkspaceRoot().string();
-        ImGui::Dummy(ImVec2(1.0f, 24.0f));
-        TextCentered(defaultPath.c_str(), Muted);
+            "new workspaces go to " + Software::Slate::WorkspaceRegistryService::DefaultWorkspaceRoot().string();
+        ImGui::Dummy(ImVec2(1.0f, Tokens::SpaceL));
+        TextCentered(defaultPath.c_str(), TextFaint());
     }
 
     void SlateWorkspaceMode::DrawWorkspaceSwitcher(Software::Core::Runtime::AppContext& context)
     {
+        using namespace Software::Slate::UI;
         auto& workspace = WorkspaceContext(context);
         auto& ui = UiState(context);
         const auto& vaults = workspace.WorkspaceRegistry().Vaults();
         ui.workspaceNavigation.SetCount(vaults.size());
 
         const float width = CenteredColumnWidth(760.0f);
-        const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 68.0f);
+        const float height = std::max(1.0f, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - Tokens::FooterHeight - 2.0f);
         SetCursorCenteredForWidth(width);
         ImGui::BeginChild("WorkspaceSwitcherList", ImVec2(width, height), false,
                           ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
-        ImGui::TextColored(Cyan, "workspaces");
-        ImGui::Separator();
+        const std::string count = std::to_string(vaults.size()) + (vaults.size() == 1 ? " workspace" : " workspaces");
+        ScreenHeader("workspaces", nullptr, count.c_str(), Green);
 
         if (vaults.empty())
         {
-            ImGui::TextColored(Muted, "no workspaces registered");
+            ImGui::TextColored(TextFaint(), "no workspaces registered");
             ImGui::EndChild();
             return;
         }
 
+        const auto* activeVault = workspace.WorkspaceRegistry().ActiveVault();
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float rowHeight = lineHeight * 2.0f + 14.0f;
         for (std::size_t i = 0; i < vaults.size(); ++i)
         {
             const bool selected = i == ui.workspaceNavigation.Selected();
+            const bool active = activeVault && vaults[i].id == activeVault->id;
             const auto& vault = vaults[i];
-            ImGui::TextColored(selected ? Green : Primary, "%s %s %s", selected ? ">" : " ", vault.emoji.c_str(),
-                               vault.title.c_str());
-            ImGui::SameLine();
-            ImGui::TextColored(Muted, "%s", vault.path.string().c_str());
+            ImVec2 rowMin;
+            ImVec2 rowMax;
+            ImGui::PushID(static_cast<int>(i));
+            if (ListRow("##vault", selected, rowHeight, Green, &rowMin, &rowMax))
+            {
+                ui.workspaceNavigation.SetSelected(i);
+            }
+            ImGui::PopID();
+
+            const float tile = lineHeight * 1.7f;
+            const ImVec2 tileMin(rowMin.x + 12.0f, rowMin.y + (rowHeight - tile) * 0.5f);
+            drawList->AddRectFilled(tileMin, ImVec2(tileMin.x + tile, tileMin.y + tile), U32(Mix(Surface(3), Green, selected ? 0.18f : 0.06f)),
+                                    Tokens::RadiusM);
+            const float emojiWidth = ImGui::CalcTextSize(vault.emoji.c_str()).x;
+            drawList->AddText(ImVec2(tileMin.x + (tile - emojiWidth) * 0.5f, tileMin.y + (tile - lineHeight) * 0.5f), U32(Primary),
+                              vault.emoji.c_str());
+            const float textX = tileMin.x + tile + 12.0f;
+            drawList->AddText(ImVec2(textX, rowMin.y + 6.0f), U32(selected ? Green : Primary), vault.title.c_str());
+            drawList->PushClipRect(rowMin, ImVec2(rowMax.x - 90.0f, rowMax.y), true);
+            drawList->AddText(ImVec2(textX, rowMin.y + 8.0f + lineHeight), U32(TextFaint()), vault.path.generic_string().c_str());
+            drawList->PopClipRect();
+            if (active)
+            {
+                DrawPill(drawList, ImVec2(rowMax.x - PillWidth("open") - 12.0f, rowMin.y + 8.0f), "open", Green);
+            }
+            ImGui::Dummy(ImVec2(1.0f, 2.0f));
         }
         ImGui::EndChild();
     }

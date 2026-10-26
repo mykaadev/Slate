@@ -140,6 +140,30 @@ namespace Software::Slate
                     {
                         settings.fontFamily = value;
                     }
+                    else if (key == "interface_scale")
+                    {
+                        SettingsFile::ParseInt(value, &settings.interfaceScale);
+                    }
+                    else if (key == "start_screen")
+                    {
+                        SettingsFile::ParseInt(value, &settings.startScreen);
+                    }
+                    else if (key == "boot_sequence")
+                    {
+                        SettingsFile::ParseBool(value, &settings.bootSequence);
+                    }
+                    else if (key == "status_clock")
+                    {
+                        SettingsFile::ParseBool(value, &settings.statusClock);
+                    }
+                    else if (key == "cursor_blink")
+                    {
+                        SettingsFile::ParseBool(value, &settings.cursorBlink);
+                    }
+                    else if (key == "scanlines")
+                    {
+                        SettingsFile::ParseInt(value, &settings.scanlines);
+                    }
                 }
 
                 if (file.bad())
@@ -216,6 +240,12 @@ namespace Software::Slate
         file << "live_preview\t" << SettingsFile::SerializeBool(sanitized.livePreview) << '\n';
         file << "heading_scale\t" << SettingsFile::SerializeBool(sanitized.headingScale) << '\n';
         file << "font_family\t" << SettingsFile::Escape(sanitized.fontFamily) << '\n';
+        file << "interface_scale\t" << SettingsFile::SerializeInt(sanitized.interfaceScale) << '\n';
+        file << "start_screen\t" << SettingsFile::SerializeInt(sanitized.startScreen) << '\n';
+        file << "boot_sequence\t" << SettingsFile::SerializeBool(sanitized.bootSequence) << '\n';
+        file << "status_clock\t" << SettingsFile::SerializeBool(sanitized.statusClock) << '\n';
+        file << "cursor_blink\t" << SettingsFile::SerializeBool(sanitized.cursorBlink) << '\n';
+        file << "scanlines\t" << SettingsFile::SerializeInt(sanitized.scanlines) << '\n';
         return static_cast<bool>(file);
     }
 
@@ -241,6 +271,9 @@ namespace Software::Slate
         sanitized.imageStoragePolicy = std::clamp(sanitized.imageStoragePolicy,
                                                  static_cast<int>(ImageStoragePolicy::WorkspaceMediaFolder),
                                                  static_cast<int>(ImageStoragePolicy::EmbedInMarkdown));
+        sanitized.interfaceScale = std::clamp(sanitized.interfaceScale, 80, 150);
+        sanitized.startScreen = std::clamp(sanitized.startScreen, 0, 2);
+        sanitized.scanlines = std::clamp(sanitized.scanlines, 0, 2);
         if (sanitized.fontFamily.empty() || sanitized.fontFamily.size() > 64)
         {
             sanitized.fontFamily = "Cascadia Mono";

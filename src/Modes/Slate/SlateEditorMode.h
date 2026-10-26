@@ -23,6 +23,8 @@ namespace Software::Modes::Slate
         std::string ModeHelperText(const Software::Core::Runtime::AppContext& context) const override;
         // Reports whether the editor should get focus back after overlays close
         bool WantsNativeEditorVisible(const Software::Core::Runtime::AppContext& context) const override;
+        // EDIT while typing, READ in reading view, NOTE otherwise
+        std::string StatusBadge(const Software::Core::Runtime::AppContext& context) const override;
 
         // Draws the breadcrumb header above the page
         void DrawHeader(Software::Core::Runtime::AppContext& context, const Software::Slate::DocumentService::Document& document);
