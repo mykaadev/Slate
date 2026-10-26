@@ -1,5 +1,7 @@
 #include "App/Slate/Modules/Ui/SlateUiModule.h"
 
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
+#include "App/Slate/Extensions/SlateShellBridge.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/Overlays/SlateSearchOverlayController.h"
 #include "App/Slate/Overlays/SlateWorkspaceSwitcherOverlay.h"
@@ -21,5 +23,7 @@ namespace Software::Slate::Modules
         context.services.Register<Software::Slate::SlateUiState>(m_state);
         context.services.Register<Software::Slate::SlateSearchOverlayController>(m_searchOverlay);
         context.services.Register<Software::Slate::SlateWorkspaceSwitcherOverlay>(m_workspaceSwitcherOverlay);
+        context.services.Register<Software::Slate::SlateExtensionRegistry>(std::make_shared<Software::Slate::SlateExtensionRegistry>());
+        context.services.Register<Software::Slate::SlateShellBridge>(std::make_shared<Software::Slate::SlateShellBridge>());
     }
 }

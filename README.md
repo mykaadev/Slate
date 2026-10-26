@@ -78,7 +78,7 @@ It is meant to feel quiet: open a workspace, write a note, jump to today’s jou
       a cloud platform<br>
       a locked note database<br>
       a social productivity app<br>
-      a plugin marketplace<br>
+      a plugin store<br>
       an everything workspace
     </td>
   </tr>
@@ -109,11 +109,14 @@ The goal is not to be an Obsidian clone, a cloud workspace, or a giant knowledge
 | Feature | What it does |
 | --- | --- |
 | **Local-first Markdown workspace** | Notes live as regular `.md` files in folders you control. |
-| **Markdown editing + preview** | Edit Markdown, preview rendered content, and inspect a heading outline. |
+| **Live preview editing** | Markdown renders in place as you write. Syntax shows only on the line you are editing, like Obsidian. |
+| **Markdown preview + outline** | Open a rendered side preview with images, and a heading outline. |
 | **File tree + library views** | Move through nested folders with a quiet, rail-based tree view. |
 | **Workspace search** | Search file names, note text, and recent files. |
 | **Inline slash commands** | Type `/todo`, `/table`, `/callout`, `/image`, and more while writing. |
 | **Bindable shortcuts** | Helper text follows the active shortcut bindings. |
+| **Command palette** | `ctrl+shift+p` or `:` lists every command, built-in or plugin, with tab completion. |
+| **Lua plugins and mods** | Add commands, slash commands, home entries, status items, key bindings, and themes. See [docs/PLUGINS.md](docs/PLUGINS.md). |
 
 </div>
 
@@ -343,6 +346,31 @@ Notes/
 ```
 
 If a filename already exists, Slate keeps the name readable and appends a suffix like `screenshot_2.png`.
+
+---
+
+## 🔌 Plugins
+
+Plugins are small Lua scripts in `%APPDATA%/Slate/plugins/<name>/`. Slate reloads a plugin when you save its files.
+
+```lua
+-- main.lua
+slate.slash.register { id = "date", description = "Insert today's date",
+  run = function() return os.date("%Y-%m-%d") end }
+
+slate.command.register { id = "hello", aliases = { "hello" },
+  run = function(args) return "hello " .. args end }
+
+slate.on("document_open", function(path) slate.log("opened " .. path) end)
+```
+
+- Run `:plugin new <name>` to create a starter plugin.
+- Run `:plugins` to enable or disable plugins.
+- Run `:init` to create your personal `init.lua`.
+
+Mods can ship themes with no code: add a `themes/shell/*.tsv` or `themes/markdown/*.tsv` folder to a plugin.
+
+The full API is in [docs/PLUGINS.md](docs/PLUGINS.md).
 
 ---
 

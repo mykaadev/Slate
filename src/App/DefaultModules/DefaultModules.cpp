@@ -4,6 +4,7 @@
 
 #include "App/Slate/Modules/Commands/SlateCommandModule.h"
 #include "App/Slate/Modules/Editor/SlateEditorModule.h"
+#include "App/Slate/Modules/Plugins/SlatePluginModule.h"
 #include "App/Slate/Modules/Routes/SlateRouteModule.h"
 #include "App/Slate/Modules/Startup/SlateStartupModule.h"
 #include "App/Slate/Modules/Todos/SlateTodoModule.h"
@@ -23,5 +24,6 @@ namespace Software::App::DefaultModules
         modules.Register(std::make_unique<Software::Slate::Modules::SlateCommandModule>(), moduleContext);
         modules.Register(std::make_unique<Software::Slate::Modules::SlateRouteModule>(), moduleContext);
         modules.Register(std::make_unique<Software::Slate::Modules::SlateStartupModule>(), moduleContext);
+        modules.Register(std::make_unique<Software::Slate::Modules::SlatePluginModule>(), moduleContext);
     }
 }

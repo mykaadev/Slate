@@ -208,6 +208,69 @@ namespace Software::Slate
         return false;
     }
 
+    bool SlateEditorContext::SelectedText(std::string* text) const
+    {
+        if (!text)
+        {
+            return false;
+        }
+        text->clear();
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            return m_nativeEditor->SelectedText(text);
+        }
+        return true;
+    }
+
+    bool SlateEditorContext::CaretPosition(std::size_t* line, std::size_t* column) const
+    {
+        std::string lineText;
+        std::size_t caretColumn = 0;
+        if (!ActiveLineTextAndCaret(&lineText, &caretColumn))
+        {
+            return false;
+        }
+
+        const std::size_t lineIndex = (m_nativeEditor && m_nativeEditor->Available())
+                                          ? static_cast<std::size_t>(std::max(0, m_nativeEditor->GetScrollState().caretLine))
+                                          : m_editor.ActiveLine();
+        if (line)
+        {
+            *line = lineIndex + 1;
+        }
+        if (column)
+        {
+            *column = caretColumn + 1;
+        }
+        return true;
+    }
+
+    bool SlateEditorContext::ReplaceAllText(DocumentService& documents, const std::string& text, double elapsedSeconds)
+    {
+        auto* document = documents.Active();
+        if (!document)
+        {
+            return false;
+        }
+
+        if (m_nativeEditor && m_nativeEditor->Available())
+        {
+            if (!m_nativeEditor->ReplaceAllText(text))
+            {
+                return false;
+            }
+            CommitToActiveDocument(documents, elapsedSeconds);
+        }
+        else
+        {
+            document->text = text;
+            documents.MarkEdited(elapsedSeconds);
+            m_editor.Load(document->text, document->lineEnding);
+        }
+        InvalidateJournalSummary();
+        return true;
+    }
+
     bool SlateEditorContext::ReplaceActiveLineWithText(DocumentService& documents,
                                                        const std::string& text,
                                                        double elapsedSeconds)
@@ -421,6 +484,24 @@ namespace Software::Slate
     bool SlateEditorContext::ConsumeNativeCommand(NativeEditorCommand command)
     {
         return m_nativeEditor && m_nativeEditor->ConsumeCommand(command);
+    }
+
+    bool SlateEditorContext::ConsumeNativeOpenLink(std::string* target, bool* isWikiLink)
+    {
+        return m_nativeEditor && m_nativeEditor->ConsumeOpenLink(target, isWikiLink);
+    }
+
+    void SlateEditorContext::SetNativeChordBindings(const std::vector<NativeChordBinding>& bindings)
+    {
+        if (m_nativeEditor)
+        {
+            m_nativeEditor->SetChordBindings(bindings);
+        }
+    }
+
+    bool SlateEditorContext::ConsumeNativeChordCommand(std::string* commandLine)
+    {
+        return m_nativeEditor && m_nativeEditor->ConsumeChordCommand(commandLine);
     }
 
     void SlateEditorContext::ShowNativeSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex)

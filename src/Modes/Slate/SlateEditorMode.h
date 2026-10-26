@@ -55,7 +55,14 @@ namespace Software::Modes::Slate
         // Applies one slash command to the active editor line.
         bool ApplySlashCommand(Software::Core::Runtime::AppContext& context,
                                Software::Slate::DocumentService::Document& document,
-                               Software::Slate::SlashCommandKind kind);
+                               const Software::Slate::SlashCommandDefinition& command);
+        // Opens a ctrl+clicked link: web links in the browser, notes in the editor.
+        void OpenLinkTarget(Software::Core::Runtime::AppContext& context, const std::string& target, bool isWikiLink);
+        // Pushes rebindable editor chords and plugin key bindings into the native editor.
+        void SyncNativeChords(Software::Core::Runtime::AppContext& context);
+        // Returns slash commands contributed by plugins and modules.
+        std::vector<Software::Slate::SlashCommandDefinition> ExtensionSlashCommands(
+            Software::Core::Runtime::AppContext& context) const;
 
         // Selected row inside the inline slash-command palette.
         int m_slashCommandIndex = 0;

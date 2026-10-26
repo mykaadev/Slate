@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <utility>
 
 namespace Software::Core::Runtime
@@ -80,6 +81,24 @@ namespace Software::Core::Runtime
         m_entries.push_back(std::move(entry));
     }
 
+    bool CommandRegistry::Unregister(const std::string& id)
+    {
+        const auto it = std::find_if(m_entries.begin(), m_entries.end(), [&](const Entry& entry) {
+            return entry.definition.id == id;
+        });
+        if (it == m_entries.end())
+        {
+            return false;
+        }
+
+        for (auto alias = m_aliasToId.begin(); alias != m_aliasToId.end();)
+        {
+            alias = alias->second == id ? m_aliasToId.erase(alias) : std::next(alias);
+        }
+        m_entries.erase(it);
+        return true;
+    }
+
     void CommandRegistry::Clear()
     {
         m_entries.clear();
@@ -139,7 +158,16 @@ namespace Software::Core::Runtime
 
         if (bestId.empty())
         {
-            return false;
+            // Stable ids always resolve, even when a command only lists short aliases.
+            const std::size_t split = trimmed.find_first_of(" 	");
+            const std::string token = trimmed.substr(0, split);
+            const auto* definition = Find(token);
+            if (!definition || (split != std::string::npos && !definition->acceptsArguments))
+            {
+                return false;
+            }
+            bestAlias = token;
+            bestId = token;
         }
 
         if (outRequest)

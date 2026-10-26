@@ -1,0 +1,9 @@
+{
+  "id": "editing-tools",
+  "name": "Editing Tools",
+  "version": "1.0.0",
+  "description": "Toggle tasks from the keyboard, sort lines, and tidy notes on save",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

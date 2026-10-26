@@ -3,6 +3,11 @@
 #include <cstdlib>
 #include <string>
 
+#if defined(_WIN32)
+#define NOMINMAX
+#include <Windows.h>
+#endif
+
 namespace Software::Slate::AppPaths
 {
     fs::path EnvPath(const char* name)
@@ -58,5 +63,28 @@ namespace Software::Slate::AppPaths
     fs::path LegacyConfigFile(std::string_view filename)
     {
         return RootDirectory() / fs::path(std::string(filename));
+    }
+
+    fs::path ExecutableDirectory()
+    {
+#if defined(_WIN32)
+        wchar_t buffer[MAX_PATH];
+        const DWORD length = ::GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+        if (length > 0 && length < MAX_PATH)
+        {
+            return fs::path(buffer).parent_path();
+        }
+#endif
+        return fs::current_path();
+    }
+
+    fs::path UserPluginDirectory()
+    {
+        return RootDirectory() / "plugins";
+    }
+
+    fs::path UserInitScript()
+    {
+        return RootDirectory() / "init.lua";
     }
 }

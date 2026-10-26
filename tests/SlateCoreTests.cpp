@@ -13,6 +13,17 @@
 #include "App/Slate/Workspace/WorkspaceService.h"
 #include "App/Slate/Workspace/WorkspaceRegistryService.h"
 #include "App/Slate/Workspace/WorkspaceTree.h"
+#include "App/Slate/Core/SlateEvents.h"
+#include "App/Slate/Editor/LivePreviewLexer.h"
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
+#include "App/Slate/Extensions/SlateShellBridge.h"
+#include "App/Slate/Plugins/PluginManager.h"
+
+#include "Core/Runtime/AppContext.h"
+#include "Core/Runtime/CommandRegistry.h"
+#include "Core/Runtime/EventBus.h"
+#include "Core/Runtime/ServiceLocator.h"
+#include "Core/Runtime/ToolRegistry.h"
 
 #include <chrono>
 #include <algorithm>
@@ -646,10 +657,157 @@ namespace
         CHECK(fs::exists(root / ".slate" / "editor.tsv"));
         fs::remove_all(root);
     }
+
+    void TestLivePreviewStyling()
+    {
+        namespace S = Software::Slate::LivePreviewStyle;
+        using Software::Slate::StyleLivePreviewLine;
+
+        // Heading markers hide away from the caret and show dimmed on it
+        auto heading = StyleLivePreviewLine("## Plan", false, 0, false);
+        CHECK(heading.styles[0] == S::Hidden && heading.styles[2] == S::Hidden);
+        CHECK(heading.styles[3] == S::Heading2);
+        heading = StyleLivePreviewLine("## Plan", false, 0, true);
+        CHECK(heading.styles[0] == S::Markup);
+
+        // Emphasis, code, and links keep content visible and hide syntax
+        const std::string inlineText = "a **b** `c` [d](e.md)";
+        const auto inlineLine = StyleLivePreviewLine(inlineText, false, 0, false);
+        CHECK(inlineLine.styles[2] == S::Hidden && inlineLine.styles[4] == S::Bold);
+        CHECK(inlineLine.styles[inlineText.find('`')] == S::Hidden);
+        CHECK(inlineLine.styles[inlineText.find('c')] == S::Code);
+        CHECK(inlineLine.styles[inlineText.find('d')] == S::Link);
+        CHECK(inlineLine.styles[inlineText.find("e.md")] == S::Hidden);
+
+        // Snake_case words are not italics
+        const auto snake = StyleLivePreviewLine("my_var_name", false, 0, false);
+        CHECK(std::all_of(snake.styles.begin(), snake.styles.end(), [](char style) { return style == S::Default; }));
+
+        // Done tasks get a checkbox style and a strike range
+        const auto task = StyleLivePreviewLine("- [x] ship it", false, 0, false);
+        CHECK(task.styles[0] == S::Bullet && task.styles[2] == S::TaskDone && task.styles[6] == S::DoneText);
+        CHECK(task.strikes.size() == 1 && task.strikes[0].first == 6);
+
+        // Fences carry state across lines and close on a matching fence
+        const auto open = StyleLivePreviewLine("```lua", false, 0, false);
+        CHECK(open.stateOut != 0 && open.styles[0] == S::Fence);
+        const auto body = StyleLivePreviewLine("# not a heading", false, open.stateOut, false);
+        CHECK(body.styles[0] == S::CodeBlock && body.stateOut == open.stateOut);
+        CHECK(StyleLivePreviewLine("```", false, body.stateOut, false).stateOut == 0);
+
+        // Frontmatter only opens on the first line
+        const auto front = StyleLivePreviewLine("---", true, 0, false);
+        CHECK(front.styles[0] == S::Frontmatter && front.stateOut != 0);
+        CHECK(StyleLivePreviewLine("---", false, 0, false).styles[0] == S::Rule);
+
+        // Wiki aliases show only the alias
+        const auto wiki = StyleLivePreviewLine("[[Target|Alias]]", false, 0, false);
+        CHECK(wiki.styles[2] == S::Hidden && wiki.styles[9] == S::WikiLink);
+
+        std::string target;
+        bool wikiLink = false;
+        CHECK(Software::Slate::LinkTargetAt("see [[Notes/Plan|plan]] now", 8, &target, &wikiLink));
+        CHECK(target == "Notes/Plan" && wikiLink);
+        CHECK(Software::Slate::LinkTargetAt("a [doc](Docs/A.md#top) b", 4, &target, &wikiLink));
+        CHECK(target == "Docs/A.md#top" && !wikiLink);
+        CHECK(Software::Slate::LinkTargetAt("go https://example.com now", 6, &target, &wikiLink));
+        CHECK(target == "https://example.com");
+        CHECK(!Software::Slate::LinkTargetAt("plain text", 2, &target, &wikiLink));
+
+        std::size_t mark = 0;
+        CHECK(Software::Slate::TaskMarkAt("  - [ ] item", 5, &mark) && mark == 5);
+        CHECK(!Software::Slate::TaskMarkAt("  - [ ] item", 10, &mark));
+    }
+
+    void TestLuaPlugins()
+    {
+        const fs::path root = MakeTempWorkspace();
+#if defined(_WIN32)
+        _putenv_s("APPDATA", root.string().c_str());
+#else
+        setenv("APPDATA", root.string().c_str(), 1);
+#endif
+        WriteFile(root / "Slate" / "plugins" / "test-plugin" / "plugin.json",
+                  R"({"id": "test-plugin", "name": "Test Plugin", "version": "1.2.3"})");
+        WriteFile(root / "Slate" / "plugins" / "test-plugin" / "helper.lua", "return { answer = 42 }\n");
+        WriteFile(root / "Slate" / "plugins" / "test-plugin" / "main.lua", R"lua(
+assert(io == nil and dofile == nil and os.execute == nil, "sandbox leaked")
+local helper = require("helper")
+slate.command.register { id = "greet", aliases = { "greet" }, run = function(args) return "hi " .. args end }
+slate.command.register { id = "steal", aliases = { "w" }, run = function() end }
+slate.slash.register { id = "answer", description = "test", run = function() return tostring(helper.answer) end }
+slate.status.set("state", "ready")
+slate.settings.set("count", 3)
+assert(slate.settings.get("count") == 3)
+slate.on("document_before_save", function(path, text) return text .. "!" end)
+)lua");
+        WriteFile(root / "Slate" / "plugins" / "spin" / "main.lua", "while true do end\n");
+
+        Software::Core::Runtime::ServiceLocator services;
+        Software::Core::Runtime::ToolRegistry tools;
+        Software::Core::Runtime::EventBus events;
+        Software::Core::Runtime::CommandRegistry commands;
+        Software::Core::Runtime::CommandDefinition save;
+        save.id = "slate.document.save";
+        save.aliases = {"w"};
+        commands.Register(save);
+        Software::Core::Runtime::AppContext context{services, tools, events, commands, {}, false, nullptr};
+        const auto registry = std::make_shared<Software::Slate::SlateExtensionRegistry>();
+        services.Register<Software::Slate::SlateExtensionRegistry>(registry);
+        services.Register<Software::Slate::SlateShellBridge>(std::make_shared<Software::Slate::SlateShellBridge>());
+
+        Software::Slate::PluginManager plugins;
+        plugins.Start(context);
+
+        bool sawTest = false;
+        bool sawSpin = false;
+        for (const auto& plugin : plugins.Plugins())
+        {
+            if (plugin.manifest.id == "test-plugin")
+            {
+                sawTest = true;
+                CHECK(plugin.status == Software::Slate::PluginStatus::Loaded);
+                CHECK(plugin.manifest.version == "1.2.3");
+            }
+            if (plugin.manifest.id == "spin")
+            {
+                // Runaway scripts hit the time budget instead of hanging Slate
+                sawSpin = true;
+                CHECK(plugin.status == Software::Slate::PluginStatus::Failed);
+            }
+        }
+        CHECK(sawTest && sawSpin);
+
+        const auto result = commands.Execute("greet bob", context);
+        CHECK(result.succeeded && result.message == "hi bob");
+        Software::Core::Runtime::CommandRequest request;
+        CHECK(commands.Resolve("w", &request) && request.id == "slate.document.save");
+
+        const auto* slash = registry->FindSlashCommand("answer");
+        CHECK(slash != nullptr);
+        std::string replacement;
+        CHECK(slash->run(&replacement, nullptr) && replacement == "42");
+        CHECK(!registry->StatusItems().empty() && registry->StatusItems().front().text == "ready");
+
+        std::string text = "note";
+        events.Publish(Software::Slate::Events::DocumentWillSave{"a.md", &text});
+        CHECK(text == "note!");
+
+        // Disabling removes every contribution
+        CHECK(plugins.SetEnabled("test-plugin", false));
+        CHECK(commands.Find("test-plugin.greet") == nullptr);
+        CHECK(registry->FindSlashCommand("answer") == nullptr);
+        CHECK(registry->StatusItems().empty());
+
+        plugins.Stop();
+        fs::remove_all(root);
+    }
 }
 
 int main()
 {
+    TestLivePreviewStyling();
+    TestLuaPlugins();
     TestWorkspaceScan();
     TestDocumentSaveAndRecovery();
     TestSearch();

@@ -1,10 +1,15 @@
 #include "Modes/Slate/SlateHomeMode.h"
 
 #include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 namespace Software::Modes::Slate
 {
@@ -59,6 +64,22 @@ namespace Software::Modes::Slate
             {
                 BeginQuitConfirm();
             }
+            else if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
+            {
+                // Plugin entries only get keys that no built-in home action already uses
+                const ImGuiIO& io = ImGui::GetIO();
+                for (const auto& entry : registry->HomeEntries())
+                {
+                    Software::Slate::KeyBinding binding;
+                    if (!entry.key.empty() && Software::Slate::ShortcutService::ParseBinding(entry.key, &binding) &&
+                        ImGui::IsKeyPressed(binding.key, false) && io.KeyCtrl == binding.ctrl &&
+                        io.KeyShift == binding.shift && io.KeyAlt == binding.alt)
+                    {
+                        HandleCommand(entry.command, context);
+                        break;
+                    }
+                }
+            }
         }
 
         ImGui::Dummy(ImVec2(1.0f, ImGui::GetContentRegionAvail().y * 0.10f));
@@ -92,22 +113,63 @@ namespace Software::Modes::Slate
         };
         const ImVec4 systemColor{0.66f, 0.66f, 0.60f, 1.0f};
 
+        // Plugin entries join a built-in section with the same name, or get their own section
+        const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+        auto pluginEntries = [&](const std::string& name, const ImVec4& color) {
+            if (!registry)
+            {
+                return;
+            }
+            for (const auto& entry : registry->HomeEntries())
+            {
+                if (entry.section == name)
+                {
+                    ImGui::TextColored(color, "(%s)", entry.key.empty() ? ":" : entry.key.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextColored(Primary, "%s", entry.label.c_str());
+                }
+            }
+        };
+
         section("write", Green);
         action(Software::Slate::ShortcutAction::HomeJournal, "journal", Green);
         action(Software::Slate::ShortcutAction::HomeNewNote, "new", Green);
         action(Software::Slate::ShortcutAction::HomeTodos, "todos", Green);
+        pluginEntries("write", Green);
 
         section("find", Cyan);
         action(Software::Slate::ShortcutAction::HomeSearch, "search", Cyan);
+        pluginEntries("find", Cyan);
 
         section("browse", Amber);
         action(Software::Slate::ShortcutAction::HomeFiles, "files", Amber);
+        pluginEntries("browse", Amber);
+
+        if (registry)
+        {
+            std::vector<std::string> sections;
+            for (const auto& entry : registry->HomeEntries())
+            {
+                const bool builtIn = entry.section == "write" || entry.section == "find" ||
+                                     entry.section == "browse" || entry.section == "system";
+                if (!builtIn && std::find(sections.begin(), sections.end(), entry.section) == sections.end())
+                {
+                    sections.push_back(entry.section);
+                }
+            }
+            for (const auto& name : sections)
+            {
+                section(name.c_str(), MarkdownImage);
+                pluginEntries(name, MarkdownImage);
+            }
+        }
 
         section("system", systemColor);
         action(Software::Slate::ShortcutAction::HomeWorkspaces, "workspaces", systemColor);
         action(Software::Slate::ShortcutAction::HomeSettings, "config", systemColor);
         action(Software::Slate::ShortcutAction::ToggleHelp, "help", systemColor);
         action(Software::Slate::ShortcutAction::Quit, "quit", systemColor);
+        pluginEntries("system", systemColor);
 
         ImGui::EndGroup();
 

@@ -30,4 +30,13 @@ namespace Software::Slate::AppPaths
 
     /** Returns the old flat config path used by earlier builds for migration/fallback reads only. */
     fs::path LegacyConfigFile(std::string_view filename);
+
+    /** Returns the directory that holds the running executable. */
+    fs::path ExecutableDirectory();
+
+    /** Returns the per-user plugin directory, for example %APPDATA%/Slate/plugins. */
+    fs::path UserPluginDirectory();
+
+    /** Returns the per-user init script that runs like an always-on plugin. */
+    fs::path UserInitScript();
 }

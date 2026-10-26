@@ -3,7 +3,10 @@
 #include "App/Slate/Commands/SlateCommandDispatcher.h"
 #include "App/Slate/Core/PathUtils.h"
 #include "App/Slate/Editor/SlateEditorContext.h"
+#include "App/Slate/Core/SlateEvents.h"
 #include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
+#include "App/Slate/Extensions/SlateShellBridge.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
@@ -15,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstring>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -22,6 +26,101 @@
 namespace Software::Modes::Slate
 {
     using namespace Software::Slate::UI;
+
+    namespace
+    {
+        struct CommandMatch
+        {
+            Software::Core::Runtime::CommandDefinition definition;
+            int score = 0;
+        };
+
+        // Lower is better; -1 means no match. Only the first word of the prompt is matched.
+        int ScoreCommand(const Software::Core::Runtime::CommandDefinition& command, const std::string& query)
+        {
+            if (query.empty())
+            {
+                return 10;
+            }
+
+            const auto lower = [](std::string value) { return Software::Slate::PathUtils::ToLower(std::move(value)); };
+            int best = -1;
+            const auto consider = [&best](int score) {
+                if (best < 0 || score < best)
+                {
+                    best = score;
+                }
+            };
+            for (const auto& alias : command.aliases)
+            {
+                const std::string value = lower(alias);
+                if (value == query) consider(0);
+                else if (value.rfind(query, 0) == 0) consider(1);
+                else if (value.find(query) != std::string::npos) consider(4);
+            }
+            const std::string id = lower(command.id);
+            if (id == query) consider(0);
+            else if (id.substr(id.find_last_of('.') + 1).rfind(query, 0) == 0) consider(2);
+            else if (id.find(query) != std::string::npos) consider(4);
+            const std::string label = lower(command.label);
+            if (label.rfind(query, 0) == 0 || label.find(" " + query) != std::string::npos) consider(3);
+            else if (label.find(query) != std::string::npos) consider(5);
+            if (lower(command.description).find(query) != std::string::npos) consider(6);
+            return best;
+        }
+
+        std::vector<CommandMatch> MatchCommands(const Software::Core::Runtime::CommandRegistry& registry,
+                                                const std::string& buffer)
+        {
+            const std::string trimmed = Software::Slate::PathUtils::Trim(buffer);
+            const std::string query = Software::Slate::PathUtils::ToLower(trimmed.substr(0, trimmed.find_first_of(" \t")));
+            std::vector<CommandMatch> matches;
+            for (auto& definition : registry.List())
+            {
+                const int score = ScoreCommand(definition, query);
+                if (score >= 0)
+                {
+                    matches.push_back({std::move(definition), score});
+                }
+            }
+            std::stable_sort(matches.begin(), matches.end(), [](const CommandMatch& lhs, const CommandMatch& rhs) {
+                return lhs.score < rhs.score;
+            });
+            return matches;
+        }
+
+        std::string CommandToken(const Software::Core::Runtime::CommandDefinition& command)
+        {
+            return command.aliases.empty() ? command.id : command.aliases.front();
+        }
+
+        struct CommandPromptPayload
+        {
+            std::string* text = nullptr;
+            std::string completion;
+            int historyDelta = 0;
+        };
+
+        int CommandPromptCallback(ImGuiInputTextCallbackData* data)
+        {
+            auto* payload = static_cast<CommandPromptPayload*>(data->UserData);
+            if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
+            {
+                payload->text->resize(static_cast<std::size_t>(data->BufTextLen));
+                data->Buf = payload->text->data();
+            }
+            else if (data->EventFlag == ImGuiInputTextFlags_CallbackCompletion && !payload->completion.empty())
+            {
+                data->DeleteChars(0, data->BufTextLen);
+                data->InsertChars(0, payload->completion.c_str());
+            }
+            else if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory)
+            {
+                payload->historyDelta = data->EventKey == ImGuiKey_UpArrow ? -1 : 1;
+            }
+            return 0;
+        }
+    }
     void SlateModeBase::OnExit(Software::Core::Runtime::AppContext& context)
     {
         EditorContext(context).SetNativeEditorVisible(false);
@@ -47,6 +146,7 @@ namespace Software::Modes::Slate
     void SlateModeBase::DrawUI(Software::Core::Runtime::AppContext& context)
     {
         m_nowSeconds = context.frame.elapsedSeconds;
+        ProcessShellRequests(context);
 
         std::string backgroundError;
         if (WorkspaceContext(context).ConsumeBackgroundError(&backgroundError))
@@ -201,6 +301,7 @@ namespace Software::Modes::Slate
         BeginPrompt("command", "", [this](const std::string& value, Software::Core::Runtime::AppContext& context) {
             HandleCommand(value, context);
         });
+        m_prompt.commandMode = true;
     }
 
     void SlateModeBase::BeginPrompt(std::string title, std::string initialValue, PromptCallback callback)
@@ -268,11 +369,29 @@ namespace Software::Modes::Slate
         auto& editor = EditorContext(context);
         editor.CommitToActiveDocument(workspace.Documents(), m_nowSeconds);
 
+        // Plugins may rewrite the text right before it hits disk
+        auto* document = workspace.Documents().Active();
+        const bool wasDirty = document && document->dirty;
+        const Software::Slate::fs::path savedPath = document ? document->relativePath : Software::Slate::fs::path();
+        if (wasDirty)
+        {
+            std::string text = document->text;
+            context.events.Publish(Software::Slate::Events::DocumentWillSave{savedPath, &text});
+            if (text != document->text)
+            {
+                editor.ReplaceAllText(workspace.Documents(), text, m_nowSeconds);
+            }
+        }
+
         std::string error;
         if (workspace.SaveDocument(&error))
         {
             editor.NotifyDocumentSaved();
             SetStatus("saved");
+            if (wasDirty)
+            {
+                context.events.Publish(Software::Slate::Events::DocumentSaved{savedPath});
+            }
             return true;
         }
 
@@ -326,6 +445,7 @@ namespace Software::Modes::Slate
 
         SetStatus("opened " + relativePath.generic_string());
         ActivateMode(Software::Slate::ModeIds::Editor, context);
+        context.events.Publish(Software::Slate::Events::DocumentOpened{workspace.Documents().Active()->relativePath});
 
         const auto* document = workspace.Documents().Active();
         if (document && document->recoveryAvailable)
@@ -418,6 +538,7 @@ namespace Software::Modes::Slate
         editor.Clear();
         ui.ResetForWorkspace(workspace.Workspace());
         SetStatus("workspace opened: " + workspace.Workspace().Root().string());
+        context.events.Publish(Software::Slate::Events::WorkspaceOpened{workspace.Workspace().Root()});
         ActivateMode(Software::Slate::ModeIds::Home, context);
         return true;
     }
@@ -444,6 +565,7 @@ namespace Software::Modes::Slate
         editor.Clear();
         ui.ResetForWorkspace(workspace.Workspace());
         SetStatus(vault.emoji + " " + vault.title);
+        context.events.Publish(Software::Slate::Events::WorkspaceOpened{workspace.Workspace().Root()});
         ActivateMode(Software::Slate::ModeIds::Home, context);
         return true;
     }
@@ -850,6 +972,12 @@ namespace Software::Modes::Slate
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
+        const ImVec2 promptPos = ImGui::GetCursorPos();
+        if (m_prompt.commandMode)
+        {
+            DrawCommandSuggestions(context, promptPos, size.x);
+            ImGui::SetCursorPos(promptPos);
+        }
         ImGui::BeginChild("PromptOverlay", size, true);
         ImGui::TextColored(Cyan, "%s", m_prompt.title.c_str());
         ImGui::SetNextItemWidth(-1.0f);
@@ -858,8 +986,52 @@ namespace Software::Modes::Slate
             ImGui::SetKeyboardFocusHere();
             m_prompt.focus = false;
         }
-        const auto result = InputTextString("##prompt", m_prompt.buffer, ImGuiInputTextFlags_EnterReturnsTrue);
-        if (result.submitted)
+
+        bool submitted = false;
+        if (m_prompt.commandMode)
+        {
+            const auto matches = MatchCommands(context.commands, m_prompt.buffer);
+            CommandPromptPayload payload;
+            payload.text = &m_prompt.buffer;
+            if (!matches.empty())
+            {
+                const auto& selected = matches[static_cast<std::size_t>(
+                    std::clamp(m_prompt.selected, 0, static_cast<int>(matches.size()) - 1))].definition;
+                payload.completion = CommandToken(selected) + (selected.acceptsArguments ? " " : "");
+            }
+            if (m_prompt.buffer.capacity() < m_prompt.buffer.size() + 256)
+            {
+                m_prompt.buffer.reserve(m_prompt.buffer.size() + 256);
+            }
+            submitted = ImGui::InputText("##prompt", m_prompt.buffer.data(), m_prompt.buffer.capacity() + 1,
+                                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackResize |
+                                             ImGuiInputTextFlags_CallbackCompletion | ImGuiInputTextFlags_CallbackHistory,
+                                         CommandPromptCallback, &payload);
+            m_prompt.buffer.resize(std::strlen(m_prompt.buffer.c_str()));
+            if (payload.historyDelta != 0 && !matches.empty())
+            {
+                const int count = static_cast<int>(matches.size());
+                m_prompt.selected = (m_prompt.selected + payload.historyDelta + count) % count;
+            }
+
+            // A typed command that resolves runs as typed; otherwise the highlighted suggestion runs
+            Software::Core::Runtime::CommandRequest resolved;
+            if (submitted && !context.commands.Resolve(m_prompt.buffer, &resolved) && !matches.empty())
+            {
+                const std::string trimmed = Software::Slate::PathUtils::Trim(m_prompt.buffer);
+                const std::size_t split = trimmed.find_first_of(" \t");
+                const std::string arguments = split == std::string::npos ? std::string() : trimmed.substr(split + 1);
+                const auto& selected = matches[static_cast<std::size_t>(
+                    std::clamp(m_prompt.selected, 0, static_cast<int>(matches.size()) - 1))].definition;
+                m_prompt.buffer = selected.id + (arguments.empty() ? std::string() : " " + arguments);
+            }
+        }
+        else
+        {
+            submitted = InputTextString("##prompt", m_prompt.buffer, ImGuiInputTextFlags_EnterReturnsTrue).submitted;
+        }
+
+        if (submitted)
         {
             auto callback = std::move(m_prompt.callback);
             const std::string value = Software::Slate::PathUtils::Trim(m_prompt.buffer);
@@ -947,6 +1119,148 @@ namespace Software::Modes::Slate
             statusColor.w = std::clamp(1.0f - age / 4.0f, 0.22f, 1.0f);
         }
         ImGui::TextColored(statusColor, "%s", m_status.c_str());
+
+        // Plugin status items sit on the right, separated like a terminal status bar
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+            registry && !registry->StatusItems().empty())
+        {
+            std::string right;
+            for (const auto& item : registry->StatusItems())
+            {
+                right += (right.empty() ? "" : "  \xc2\xb7  ") + item.text;
+            }
+            const float width = ImGui::CalcTextSize(right.c_str()).x;
+            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - width));
+            ImGui::TextColored(Muted, "%s", right.c_str());
+        }
+    }
+
+    void SlateModeBase::DrawCommandSuggestions(Software::Core::Runtime::AppContext& context, const ImVec2& promptPos, float width)
+    {
+        if (m_prompt.buffer != m_prompt.lastQuery)
+        {
+            m_prompt.lastQuery = m_prompt.buffer;
+            m_prompt.selected = 0;
+        }
+
+        const auto matches = MatchCommands(context.commands, m_prompt.buffer);
+        if (matches.empty())
+        {
+            return;
+        }
+
+        const int count = static_cast<int>(matches.size());
+        m_prompt.selected = std::clamp(m_prompt.selected, 0, count - 1);
+        const int visible = std::min(count, 8);
+        const int first = std::clamp(m_prompt.selected - visible + 1, 0, count - visible);
+        const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+        const float height = rowHeight * static_cast<float>(visible) + 22.0f;
+
+        // Key chords bound through plugins are shown next to their commands
+        std::vector<std::pair<std::string, std::string>> chords;
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
+        {
+            for (const auto& binding : registry->KeyBindings())
+            {
+                chords.emplace_back(binding.command, Software::Slate::ShortcutService::SerializeBinding(binding.binding));
+            }
+        }
+
+        ImGui::SetCursorPos(ImVec2(promptPos.x, promptPos.y - height - 6.0f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Muted.x, Muted.y, Muted.z, 0.22f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 10.0f));
+        ImGui::BeginChild("CommandSuggestions", ImVec2(width, height), true, ImGuiWindowFlags_NoScrollbar);
+        float tokenWidth = 0.0f;
+        for (int index = first; index < first + visible; ++index)
+        {
+            tokenWidth = std::max(tokenWidth, ImGui::CalcTextSize(CommandToken(matches[static_cast<std::size_t>(index)].definition).c_str()).x);
+        }
+        tokenWidth += ImGui::CalcTextSize("> ").x + 14.0f + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+        for (int index = first; index < first + visible; ++index)
+        {
+            const auto& command = matches[static_cast<std::size_t>(index)].definition;
+            const bool selected = index == m_prompt.selected;
+            const float rowY = ImGui::GetCursorPosY();
+            ImGui::TextColored(selected ? Green : Muted, "%s", selected ? ">" : " ");
+            ImGui::SameLine();
+            ImGui::TextColored(selected ? Green : Amber, "%s", CommandToken(command).c_str());
+            ImGui::SameLine(tokenWidth);
+            ImGui::TextColored(selected ? Primary : ImVec4(Primary.x, Primary.y, Primary.z, 0.78f), "%s", command.label.c_str());
+
+            std::string hint = command.category;
+            for (const auto& [chordCommand, chord] : chords)
+            {
+                if (chordCommand == command.id || chordCommand == CommandToken(command))
+                {
+                    hint = chord;
+                }
+            }
+            const float hintWidth = ImGui::CalcTextSize(hint.c_str()).x;
+            ImGui::SameLine(std::max(tokenWidth + 160.0f, ImGui::GetWindowWidth() - 14.0f - hintWidth));
+            ImGui::SetCursorPosY(rowY);
+            ImGui::TextColored(Muted, "%s", hint.c_str());
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+    }
+
+    void SlateModeBase::ProcessShellRequests(Software::Core::Runtime::AppContext& context)
+    {
+        const auto bridge = context.services.Resolve<Software::Slate::SlateShellBridge>();
+        if (!bridge)
+        {
+            return;
+        }
+
+        // A handful per frame keeps a runaway plugin from stalling the UI
+        Software::Slate::ShellRequest request;
+        for (int processed = 0; processed < 16 && bridge->Pop(&request); ++processed)
+        {
+            switch (request.kind)
+            {
+            case Software::Slate::ShellRequest::Kind::Command:
+                HandleCommand(request.text, context);
+                break;
+            case Software::Slate::ShellRequest::Kind::Status:
+                SetStatus(request.text);
+                break;
+            case Software::Slate::ShellRequest::Kind::Error:
+                SetError(request.text);
+                break;
+            case Software::Slate::ShellRequest::Kind::Prompt:
+                if (m_prompt.open || m_confirm.open)
+                {
+                    bridge->Defer(std::move(request));
+                    return;
+                }
+                BeginPrompt(request.text, request.value,
+                            [onPrompt = std::move(request.onPrompt)](const std::string& value, Software::Core::Runtime::AppContext&) {
+                                if (onPrompt)
+                                {
+                                    onPrompt(value);
+                                }
+                            });
+                break;
+            case Software::Slate::ShellRequest::Kind::Confirm:
+                if (m_prompt.open || m_confirm.open)
+                {
+                    bridge->Defer(std::move(request));
+                    return;
+                }
+                BeginConfirm(request.text, false,
+                             [onConfirm = std::move(request.onConfirm)](bool accepted, Software::Core::Runtime::AppContext&) {
+                                 if (onConfirm)
+                                 {
+                                     onConfirm(accepted);
+                                 }
+                             });
+                break;
+            }
+        }
     }
 
     std::string SlateModeBase::HelperText(const Software::Core::Runtime::AppContext& context) const
@@ -1042,7 +1356,8 @@ namespace Software::Modes::Slate
             return;
         }
 
-        if (shortcuts.Pressed(Software::Slate::ShortcutAction::CommandPalette))
+        if (shortcuts.Pressed(Software::Slate::ShortcutAction::CommandPalette) ||
+            (io.KeyCtrl && io.KeyShift && IsKeyPressed(ImGuiKey_P)))
         {
             BeginCommandPrompt();
             return;

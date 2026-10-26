@@ -61,6 +61,12 @@ namespace Software::Slate
         bool ActiveLineTextAndCaret(std::string* text, std::size_t* caretColumn) const;
         // Reports whether the active editor path currently has selected text.
         bool HasSelection() const;
+        // Reads the selected text of the active editor path
+        bool SelectedText(std::string* text) const;
+        // Reads the caret as 1-based line and byte column
+        bool CaretPosition(std::size_t* line, std::size_t* column) const;
+        // Replaces the whole document text as one undoable edit
+        bool ReplaceAllText(DocumentService& documents, const std::string& text, double elapsedSeconds);
         // Replaces the current line with a text block
         bool ReplaceActiveLineWithText(DocumentService& documents, const std::string& text, double elapsedSeconds);
         // Parses headings from the active document
@@ -102,6 +108,12 @@ namespace Software::Slate
         void NotifyDocumentSaved();
         // Pulls one pending command from the native editor
         bool ConsumeNativeCommand(NativeEditorCommand command);
+        // Pulls the ctrl+clicked link target from the native editor
+        bool ConsumeNativeOpenLink(std::string* target, bool* isWikiLink);
+        // Replaces the key chords the native editor intercepts while focused
+        void SetNativeChordBindings(const std::vector<NativeChordBinding>& bindings);
+        // Pulls one command line raised by a native editor chord
+        bool ConsumeNativeChordCommand(std::string* commandLine);
         // Shows native slash-command suggestions above the Scintilla editor window.
         void ShowNativeSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex);
         // Hides native slash-command suggestions.

@@ -128,6 +128,18 @@ namespace Software::Slate
                     {
                         SettingsFile::ParseInt(value, &settings.imageStoragePolicy);
                     }
+                    else if (key == "live_preview")
+                    {
+                        SettingsFile::ParseBool(value, &settings.livePreview);
+                    }
+                    else if (key == "heading_scale")
+                    {
+                        SettingsFile::ParseBool(value, &settings.headingScale);
+                    }
+                    else if (key == "font_family")
+                    {
+                        settings.fontFamily = value;
+                    }
                 }
 
                 if (file.bad())
@@ -201,6 +213,9 @@ namespace Software::Slate
         file << "auto_list_continuation\t" << SettingsFile::SerializeBool(sanitized.autoListContinuation) << '\n';
         file << "paste_clipboard_images\t" << SettingsFile::SerializeBool(sanitized.pasteClipboardImages) << '\n';
         file << "image_storage_policy\t" << SettingsFile::SerializeInt(sanitized.imageStoragePolicy) << '\n';
+        file << "live_preview\t" << SettingsFile::SerializeBool(sanitized.livePreview) << '\n';
+        file << "heading_scale\t" << SettingsFile::SerializeBool(sanitized.headingScale) << '\n';
+        file << "font_family\t" << SettingsFile::Escape(sanitized.fontFamily) << '\n';
         return static_cast<bool>(file);
     }
 
@@ -226,6 +241,10 @@ namespace Software::Slate
         sanitized.imageStoragePolicy = std::clamp(sanitized.imageStoragePolicy,
                                                  static_cast<int>(ImageStoragePolicy::WorkspaceMediaFolder),
                                                  static_cast<int>(ImageStoragePolicy::EmbedInMarkdown));
+        if (sanitized.fontFamily.empty() || sanitized.fontFamily.size() > 64)
+        {
+            sanitized.fontFamily = "Cascadia Mono";
+        }
         return sanitized;
     }
 }

@@ -1,0 +1,9 @@
+{
+  "id": "word-count",
+  "name": "Word Count",
+  "version": "1.0.0",
+  "description": "Shows words and reading time for the open note in the status line",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

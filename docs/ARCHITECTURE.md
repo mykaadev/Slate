@@ -43,6 +43,7 @@ public:
 - `slate.commands` — registers the built-in command surface.
 - `slate.routes` — registers existing Slate modes as route adapters.
 - `slate.startup` — chooses the initial route after services are live.
+- `slate.plugins` — owns `PluginManager` (Lua plugins) and the `:plugins`, `:reload`, `:plugin new`, and `:init` commands.
 
 The old feature compatibility layer has been removed from the app runtime. New behavior should enter through modules, commands, services, overlays, or routes.
 
@@ -132,3 +133,25 @@ Keyboard bindings are owned by `Slate.Input` / `ShortcutService`. New modules sh
 ## Todo document ownership
 
 Todos are owned by `Slate.Todos` and stored as standalone Markdown documents under the workspace `Todos/` folder. The todo overlay creates, updates, deletes, opens, and filters todo documents through `TodoService`; it should not write `#todo` blocks into arbitrary notes. Legacy inline todo parsing remains only as Markdown compatibility for old files and rendering.
+
+## Extension points
+
+The shell never depends on the Lua runtime. Plugins (and any native module) contribute through two services that `slate.ui` registers:
+
+- `SlateExtensionRegistry` stores home entries, status line items, slash commands, and command key bindings, keyed by owner. `RemoveOwner` removes everything an owner added.
+- `SlateShellBridge` is a queue of shell requests: run a command line, set status, prompt, and confirm. `SlateModeBase` drains it at the start of each frame. Services and plugins never call into a mode directly.
+
+App events live in `App/Slate/Core/SlateEvents.h` (`DocumentOpened`, `DocumentWillSave`, `DocumentSaved`, `WorkspaceOpened`). `SlateModeBase` publishes them through the `EventBus`. `DocumentWillSave` carries a pointer to the text, so listeners can rewrite it before the write.
+
+`PluginManager` (`App/Slate/Plugins`) gives each plugin its own sandboxed `lua_State`. Lua is compiled as C++, so script errors unwind with exceptions. `PluginLuaApi.cpp` holds the `slate.*` bindings. The plugin API is documented in `docs/PLUGINS.md`.
+
+## Live preview editor
+
+`LivePreviewLexer` replaces Lexilla's Markdown lexer inside Scintilla. `StyleLivePreviewLine` is a pure function, unit tested in `SlateCoreTests`. It styles one line and carries fence and frontmatter state through Scintilla line states.
+
+Syntax characters get the `Hidden` style (invisible) on every line except those touched by a selection. On those lines they get the dimmed `Markup` style. Scintilla treats invisible text as read-only, so `ScintillaEditorHost` follows two rules:
+
+- `UpdateReveal()` runs before every key message and every frame, so the lines being edited always show their markup.
+- Programmatic edits call `RevealRangeForEdit` before they replace text.
+
+Scintilla gives every line the same height, so heading sizes are opt-in (`heading_scale`). By default, headings use color and weight.

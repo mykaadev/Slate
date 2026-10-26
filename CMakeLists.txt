@@ -35,6 +35,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# Lua powers Slate plugins. It is compiled as C++ so script errors unwind
+# through C++ frames with exceptions instead of longjmp.
+FetchContent_Declare(
+    lua_src
+    URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(lua_src)
+file(GLOB LUA_CORE_SOURCES CONFIGURE_DEPENDS "${lua_src_SOURCE_DIR}/src/*.c")
+list(FILTER LUA_CORE_SOURCES EXCLUDE REGEX ".*/(lua|luac)\\.c$")
+set_source_files_properties(${LUA_CORE_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(SlateLua STATIC ${LUA_CORE_SOURCES})
+target_include_directories(SlateLua PUBLIC "${lua_src_SOURCE_DIR}/src")
+if(MSVC)
+    target_compile_options(SlateLua PRIVATE /TP /EHsc /wd4244 /wd4324 /wd4702)
+    target_compile_definitions(SlateLua PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 if(WIN32)
     FetchContent_Declare(
         scintilla_src
@@ -200,6 +218,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     SoftwareFramework
+    SlateLua
 )
 
 if(WIN32)
@@ -240,6 +259,7 @@ target_include_directories(SlateCoreTests PRIVATE
 
 target_link_libraries(SlateCoreTests PRIVATE
     SoftwareFramework
+    SlateLua
 )
 
 add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)

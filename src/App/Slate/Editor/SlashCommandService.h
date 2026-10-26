@@ -17,18 +17,19 @@ namespace Software::Slate
         Checklist,
         Quote,
         Divider,
-        Link
+        Link,
+        Extension
     };
 
     // Describes one slash command entry displayed in the inline editor palette.
     struct SlashCommandDefinition
     {
         // Stable command id typed after the slash, for example "todo".
-        std::string_view id;
+        std::string id;
         // Short label shown in the palette.
-        std::string_view label;
+        std::string label;
         // One-line explanation shown under the label.
-        std::string_view description;
+        std::string description;
         // Command behavior used when applying the selected entry.
         SlashCommandKind kind;
     };
@@ -50,6 +51,9 @@ namespace Software::Slate
                                          std::size_t* tokenEnd = nullptr);
         // Returns commands matching a typed slash query.
         static std::vector<SlashCommandDefinition> Filter(std::string_view query);
+        // Returns built-in plus extension commands matching a typed slash query. Extensions with a built-in id are ignored.
+        static std::vector<SlashCommandDefinition> Filter(std::string_view query,
+                                                          const std::vector<SlashCommandDefinition>& extensions);
         // Builds the Markdown replacement block for simple insert commands.
         static std::string BuildMarkdownTemplate(SlashCommandKind kind, std::string_view lineEnding);
     };

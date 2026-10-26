@@ -340,6 +340,16 @@ namespace Software::Slate
         return AppPaths::ConfigFile("appearance", "theme.tsv");
     }
 
+    void ThemeService::SetExtraPresetRoots(std::vector<fs::path> roots)
+    {
+        if (roots == m_extraPresetRoots)
+        {
+            return;
+        }
+        m_extraPresetRoots = std::move(roots);
+        m_presetsLoaded = false;
+    }
+
     void ThemeService::EnsurePresetsLoaded() const
     {
         if (m_presetsLoaded)
@@ -350,7 +360,9 @@ namespace Software::Slate
         m_shellPresets.clear();
         m_markdownPresets.clear();
 
-        for (const auto& root : CandidatePresetRoots())
+        std::vector<fs::path> roots = CandidatePresetRoots();
+        roots.insert(roots.end(), m_extraPresetRoots.begin(), m_extraPresetRoots.end());
+        for (const auto& root : roots)
         {
             const fs::path shellDir = root / "shell";
             for (const auto& filePath : CollectPresetFiles(shellDir))

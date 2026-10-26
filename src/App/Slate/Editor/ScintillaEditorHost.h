@@ -2,6 +2,7 @@
 
 #include "App/Slate/Documents/DocumentService.h"
 #include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Editor/LivePreviewLexer.h"
 #include "App/Slate/Editor/SlashCommandService.h"
 
 #include <cstdint>
@@ -26,6 +27,22 @@ namespace Software::Slate
         SlashNext = 1u << 10,
         SlashPrevious = 1u << 11,
         SlashCancel = 1u << 12,
+        OpenLink = 1u << 13,
+    };
+
+    // One key chord the native editor intercepts while it has focus
+    struct NativeChordBinding
+    {
+        // Stores the ImGuiKey value of the chord
+        int imguiKey = 0;
+        // Stores the required modifiers
+        bool ctrl = false;
+        bool shift = false;
+        bool alt = false;
+        // Stores the built-in command raised, or zero for a command line
+        std::uint32_t command = 0;
+        // Stores the command line queued when command is zero
+        std::string commandLine;
     };
 
     // Wraps the native Scintilla editor window
@@ -91,6 +108,10 @@ namespace Software::Slate
         bool CurrentLineTextAndCaret(std::string* text, std::size_t* caretColumn) const;
         // Reports whether the native editor currently has an active text selection.
         bool HasSelection() const;
+        // Reads the main selection text
+        bool SelectedText(std::string* text) const;
+        // Replaces the whole buffer as one undo step and keeps the caret near its old position
+        bool ReplaceAllText(const std::string& text);
         // Replaces the current line text
         bool ReplaceCurrentLine(const std::string& text);
         // Deletes the current physical line
@@ -107,6 +128,12 @@ namespace Software::Slate
 
         // Consumes one pending command bit
         bool ConsumeCommand(NativeEditorCommand command);
+        // Reads the link the user ctrl+clicked; pair with NativeEditorCommand::OpenLink
+        bool ConsumeOpenLink(std::string* target, bool* isWikiLink);
+        // Replaces the chords the editor intercepts; cheap when unchanged
+        void SetChordBindings(const std::vector<NativeChordBinding>& bindings);
+        // Pops one command line queued by a chord
+        bool ConsumeChordCommand(std::string* commandLine);
         // Consumes file paths dropped on the native editor
         bool ConsumeDroppedFiles(std::vector<std::string>* files);
 
@@ -127,6 +154,14 @@ namespace Software::Slate
         void SetText(const std::string& text);
         // Handles smart enter continuation rules
         bool HandleSmartEnter();
+        // Reveals markup on every line a selection touches and restyles lines that changed
+        void UpdateReveal();
+        // Reveals markup for a range before a programmatic edit; hidden text is read-only in Scintilla
+        void RevealRangeForEdit(std::intptr_t start, std::intptr_t end);
+        // Restyles whole lines that were already styled
+        void RestyleLines(long long firstLine, long long lastLine);
+        // Toggles a task checkbox or opens a link under a mouse click
+        bool HandleClick(int x, int y, bool ctrl);
         // Converts one command into a bit mask
         static std::uint32_t CommandMask(NativeEditorCommand command);
 
@@ -154,6 +189,22 @@ namespace Software::Slate
         void* m_slashPaletteWindow = nullptr;
 #endif
 
+        // Stores the lexer state shared with Scintilla's lexer object
+        LivePreviewLexerHandle m_livePreview;
+        // Stores the lines currently revealed
+        long long m_revealFirst = -1;
+        long long m_revealLast = -1;
+        // Stores whether markup hiding was on during the last reveal pass
+        bool m_hideMarkupApplied = true;
+        // Stores the inputs of the last theme pass so styling only reruns on change
+        std::string m_themeSignature;
+        // Stores a ctrl+clicked link target
+        std::string m_pendingLink;
+        bool m_pendingLinkIsWiki = false;
+        // Stores chords intercepted while the editor has focus
+        std::vector<NativeChordBinding> m_chords;
+        // Stores command lines raised by chords
+        std::vector<std::string> m_pendingChordCommands;
         // Stores the path currently loaded into Scintilla
         fs::path m_loadedPath;
         // Stores the last text synced into the service layer

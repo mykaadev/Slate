@@ -12,9 +12,7 @@
 #include <Scintilla.h>
 
 #include <ILexer.h>
-#include <LexerModule.h>
 
-extern const Lexilla::LexerModule lmMarkdown;
 #endif
 
 #include <algorithm>
@@ -244,12 +242,74 @@ namespace Software::Slate
             return static_cast<int>(std::clamp<int>(std::lround(pixelSize * 72.0f / 96.0f), 7l, 32l));
         }
 
+        int VirtualKeyFromImGuiKey(int key)
+        {
+            if (key >= ImGuiKey_A && key <= ImGuiKey_Z)
+            {
+                return 'A' + (key - ImGuiKey_A);
+            }
+            if (key >= ImGuiKey_0 && key <= ImGuiKey_9)
+            {
+                return '0' + (key - ImGuiKey_0);
+            }
+            if (key >= ImGuiKey_F1 && key <= ImGuiKey_F12)
+            {
+                return VK_F1 + (key - ImGuiKey_F1);
+            }
+            switch (key)
+            {
+            case ImGuiKey_Enter: return VK_RETURN;
+            case ImGuiKey_Tab: return VK_TAB;
+            case ImGuiKey_Space: return VK_SPACE;
+            case ImGuiKey_Backspace: return VK_BACK;
+            case ImGuiKey_Delete: return VK_DELETE;
+            case ImGuiKey_LeftArrow: return VK_LEFT;
+            case ImGuiKey_RightArrow: return VK_RIGHT;
+            case ImGuiKey_UpArrow: return VK_UP;
+            case ImGuiKey_DownArrow: return VK_DOWN;
+            case ImGuiKey_Home: return VK_HOME;
+            case ImGuiKey_End: return VK_END;
+            case ImGuiKey_PageUp: return VK_PRIOR;
+            case ImGuiKey_PageDown: return VK_NEXT;
+            case ImGuiKey_Comma: return VK_OEM_COMMA;
+            case ImGuiKey_Period: return VK_OEM_PERIOD;
+            case ImGuiKey_Slash: return VK_OEM_2;
+            case ImGuiKey_Semicolon: return VK_OEM_1;
+            case ImGuiKey_Minus: return VK_OEM_MINUS;
+            case ImGuiKey_Equal: return VK_OEM_PLUS;
+            case ImGuiKey_LeftBracket: return VK_OEM_4;
+            case ImGuiKey_RightBracket: return VK_OEM_6;
+            case ImGuiKey_Backslash: return VK_OEM_5;
+            case ImGuiKey_Apostrophe: return VK_OEM_7;
+            case ImGuiKey_GraveAccent: return VK_OEM_3;
+            default: return 0;
+            }
+        }
+
+        std::vector<NativeChordBinding> DefaultChords()
+        {
+            const auto chord = [](ImGuiKey key, NativeEditorCommand command) {
+                NativeChordBinding binding;
+                binding.imguiKey = key;
+                binding.ctrl = true;
+                binding.command = static_cast<std::uint32_t>(command);
+                return binding;
+            };
+            return {chord(ImGuiKey_S, NativeEditorCommand::Save), chord(ImGuiKey_F, NativeEditorCommand::Find),
+                    chord(ImGuiKey_O, NativeEditorCommand::Outline), chord(ImGuiKey_P, NativeEditorCommand::Preview)};
+        }
+
         constexpr wchar_t HostPropertyName[] = L"SlateScintillaHost";
         constexpr wchar_t SlashPaletteClassName[] = L"SlateSlashCommandPalette";
 #endif
     }
 
-    ScintillaEditorHost::ScintillaEditorHost() = default;
+    ScintillaEditorHost::ScintillaEditorHost()
+    {
+#if defined(_WIN32)
+        m_chords = DefaultChords();
+#endif
+    }
 
     ScintillaEditorHost::~ScintillaEditorHost()
     {
@@ -347,7 +407,6 @@ namespace Software::Slate
 
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_SETEOLMODE, ToEolMode(m_lineEnding), 0);
         SetText(document->text);
-        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_COLOURISE, 0, -1);
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_EMPTYUNDOBUFFER, 0, 0);
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_SETSAVEPOINT, 0, 0);
 #else
@@ -372,6 +431,7 @@ namespace Software::Slate
 
         LoadDocument(&document, false);
         ApplyThemeIfNeeded();
+        UpdateReveal();
         UpdateGeometry(screenX, screenY, width, height);
         SetVisible(true);
         SyncDocument(documents, elapsedSeconds);
@@ -493,9 +553,9 @@ namespace Software::Slate
             return false;
         }
 
+        UpdateReveal();
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_REPLACESEL, 0,
                        reinterpret_cast<LPARAM>(text.c_str()));
-        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_COLOURISE, 0, -1);
         Focus();
         return true;
 #else
@@ -608,6 +668,57 @@ namespace Software::Slate
 #endif
     }
 
+    bool ScintillaEditorHost::SelectedText(std::string* text) const
+    {
+#if defined(_WIN32)
+        if (!text || !m_editorWindow)
+        {
+            return false;
+        }
+
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const auto start = static_cast<sptr_t>(::SendMessageW(window, SCI_GETSELECTIONSTART, 0, 0));
+        const auto end = static_cast<sptr_t>(::SendMessageW(window, SCI_GETSELECTIONEND, 0, 0));
+        text->clear();
+        if (end > start)
+        {
+            std::string buffer(static_cast<std::size_t>(end - start) + 1, '\0');
+            Sci_TextRangeFull range{{start, end}, buffer.data()};
+            ::SendMessageW(window, SCI_GETTEXTRANGEFULL, 0, reinterpret_cast<LPARAM>(&range));
+            text->assign(buffer.data(), static_cast<std::size_t>(end - start));
+        }
+        return true;
+#else
+        (void)text;
+        return false;
+#endif
+    }
+
+    bool ScintillaEditorHost::ReplaceAllText(const std::string& text)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return false;
+        }
+
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const auto caret = static_cast<sptr_t>(::SendMessageW(window, SCI_GETCURRENTPOS, 0, 0));
+        const auto firstLine = ::SendMessageW(window, SCI_GETFIRSTVISIBLELINE, 0, 0);
+        RevealRangeForEdit(0, static_cast<sptr_t>(::SendMessageW(window, SCI_GETLENGTH, 0, 0)));
+        ::SendMessageW(window, SCI_BEGINUNDOACTION, 0, 0);
+        ::SendMessageW(window, SCI_TARGETWHOLEDOCUMENT, 0, 0);
+        ::SendMessageW(window, SCI_REPLACETARGET, static_cast<WPARAM>(text.size()), reinterpret_cast<LPARAM>(text.data()));
+        ::SendMessageW(window, SCI_ENDUNDOACTION, 0, 0);
+        ::SendMessageW(window, SCI_GOTOPOS, static_cast<WPARAM>(std::min<sptr_t>(caret, static_cast<sptr_t>(text.size()))), 0);
+        ::SendMessageW(window, SCI_SETFIRSTVISIBLELINE, static_cast<WPARAM>(firstLine), 0);
+        return true;
+#else
+        (void)text;
+        return false;
+#endif
+    }
+
     bool ScintillaEditorHost::ReplaceCurrentLine(const std::string& text)
     {
 #if defined(_WIN32)
@@ -628,6 +739,7 @@ namespace Software::Slate
         const auto lineEnd = static_cast<sptr_t>(call(SCI_GETLINEENDPOSITION,
                                                       static_cast<uintptr_t>(lineIndex), 0));
 
+        RevealRangeForEdit(lineStart, lineEnd);
         call(SCI_BEGINUNDOACTION, 0, 0);
         call(SCI_SETTARGETSTART, static_cast<uintptr_t>(lineStart), 0);
         call(SCI_SETTARGETEND, static_cast<uintptr_t>(lineEnd), 0);
@@ -636,7 +748,6 @@ namespace Software::Slate
         const auto newPosition = lineStart + static_cast<sptr_t>(text.size());
         call(SCI_GOTOPOS, static_cast<uintptr_t>(newPosition), 0);
         call(SCI_SCROLLCARET, 0, 0);
-        call(SCI_COLOURISE, 0, -1);
         call(SCI_ENDUNDOACTION, 0, 0);
         Focus();
         return true;
@@ -654,9 +765,9 @@ namespace Software::Slate
             return false;
         }
 
+        UpdateReveal();
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_BEGINUNDOACTION, 0, 0);
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_LINEDELETE, 0, 0);
-        ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_COLOURISE, 0, -1);
         ::SendMessageW(static_cast<HWND>(m_editorWindow), SCI_ENDUNDOACTION, 0, 0);
         return true;
 #else
@@ -1196,10 +1307,12 @@ namespace Software::Slate
         call(SCI_SETINDENT, 4, 0);
         call(SCI_SETTABINDENTS, 1, 0);
         call(SCI_SETBACKSPACEUNINDENTS, 1, 0);
-        call(SCI_SETPROPERTY, reinterpret_cast<WPARAM>("fold"), reinterpret_cast<LPARAM>("0"));
-        call(SCI_SETPROPERTY, reinterpret_cast<WPARAM>("lexer.markdown.header.eolfill"),
-             reinterpret_cast<LPARAM>("1"));
-        call(SCI_SETILEXER, 0, reinterpret_cast<LPARAM>(lmMarkdown.Create()));
+        call(SCI_SETILEXER, 0, reinterpret_cast<LPARAM>(LivePreviewLexerHandle::Create(&m_livePreview)));
+        call(SCI_INDICSETSTYLE, LivePreviewStyle::StrikeIndicator, INDIC_STRIKE);
+        call(SCI_INDICSETUNDER, LivePreviewStyle::StrikeIndicator, 0);
+        m_themeSignature.clear();
+        m_revealFirst = -1;
+        m_revealLast = -1;
 
 #endif
     }
@@ -1212,35 +1325,64 @@ namespace Software::Slate
             return;
         }
 
+        // Theme colors are global and can change at any time, so they are part of the signature
+        std::string signature;
+        const auto addColor = [&signature](const ImVec4& color) {
+            signature += std::to_string(ToColorRef(color)) + ",";
+        };
+        for (const ImVec4* color : {&UI::Background, &UI::Primary, &UI::Muted, &UI::Panel, &UI::Cyan, &UI::Amber, &UI::Green,
+                                    &UI::Red, &UI::Code, &UI::MarkdownHeading1, &UI::MarkdownHeading2, &UI::MarkdownHeading3,
+                                    &UI::MarkdownBullet, &UI::MarkdownCheckbox, &UI::MarkdownCheckboxDone, &UI::MarkdownQuote,
+                                    &UI::MarkdownTable, &UI::MarkdownLink, &UI::MarkdownImage, &UI::MarkdownBold,
+                                    &UI::MarkdownItalic, &UI::MarkdownCode})
+        {
+            addColor(*color);
+        }
+        const auto& settings = m_editorSettings;
+        signature += std::to_string(settings.fontSize) + "|" + std::to_string(settings.lineSpacing) + "|" +
+                     std::to_string(settings.tabWidth) + "|" + std::to_string(settings.caretMotion) + "|" +
+                     (settings.highlightCurrentLine ? "1" : "0") + (settings.showWhitespace ? "1" : "0") +
+                     (settings.wordWrap ? "1" : "0") + (settings.indentWithTabs ? "1" : "0") +
+                     (settings.linkUnderline ? "1" : "0") + (settings.headingScale ? "1" : "0") + "|" + settings.fontFamily;
+        if (signature == m_themeSignature)
+        {
+            return;
+        }
+        m_themeSignature = signature;
+
         const COLORREF background = ToColorRef(UI::Background);
         const COLORREF primary = ToColorRef(UI::Primary);
         const COLORREF muted = ToColorRef(UI::Muted);
+        const COLORREF markup = ToColorRef(MixColor(UI::Background, UI::Muted, 0.85f));
         const COLORREF panel = ToColorRef(UI::Panel);
+        const COLORREF codeBack = ToColorRef(MixColor(UI::Background, UI::Panel, 1.0f));
         const COLORREF selection = ToColorRef(MixColor(UI::Background, UI::Cyan, 0.38f));
         const COLORREF selectedText = ToColorRef(UI::Primary);
         const COLORREF caretLine = ToColorRef(MixColor(UI::Background, UI::Panel, 0.72f));
+        const COLORREF highlightBack = ToColorRef(MixColor(UI::Background, UI::Amber, 0.22f));
 
         const auto call = [this](unsigned int message, uintptr_t wParam = 0, intptr_t lParam = 0) {
             return ::SendMessageW(static_cast<HWND>(m_editorWindow), message, static_cast<WPARAM>(wParam),
                                   static_cast<LPARAM>(lParam));
         };
 
-        const int fontSize = m_editorSettings.fontSize;
-        const int editorPointSize = PixelFontSizeToScintillaPoints(static_cast<float>(fontSize));
-        const int lineSpacing = m_editorSettings.lineSpacing;
+        // Fractional points keep the editor text the same pixel size as the UI font
+        const int fontSize = settings.fontSize;
+        const int fractionalPoints = static_cast<int>(std::lround(static_cast<float>(fontSize) * 75.0f));
+        const int lineSpacing = settings.lineSpacing;
         const int extraAscent = (lineSpacing + 1) / 2;
         const int extraDescent = lineSpacing / 2;
-        const int tabWidth = m_editorSettings.tabWidth;
-        const int caretMotion = m_editorSettings.caretMotion;
+        const int tabWidth = settings.tabWidth;
+        const int caretMotion = settings.caretMotion;
 
-        call(SCI_STYLESETFONT, STYLE_DEFAULT, reinterpret_cast<LPARAM>("Cascadia Mono"));
-        call(SCI_STYLESETSIZE, STYLE_DEFAULT, editorPointSize);
+        call(SCI_STYLESETFONT, STYLE_DEFAULT, reinterpret_cast<LPARAM>(settings.fontFamily.c_str()));
+        call(SCI_STYLESETSIZEFRACTIONAL, STYLE_DEFAULT, fractionalPoints);
         call(SCI_STYLESETFORE, STYLE_DEFAULT, primary);
         call(SCI_STYLESETBACK, STYLE_DEFAULT, background);
         call(SCI_STYLECLEARALL, 0, 0);
 
-        call(SCI_SETCARETFORE, primary, 0);
-        call(SCI_SETCARETWIDTH, 1, 0);
+        call(SCI_SETCARETFORE, ToColorRef(UI::Amber), 0);
+        call(SCI_SETCARETWIDTH, 2, 0);
         call(SCI_SETCARETPERIOD, caretMotion == 0 ? 500 : (caretMotion == 1 ? 700 : 0), 0);
         call(SCI_SETCARETSTYLE, CARETSTYLE_LINE, 0);
         call(SCI_SETXCARETPOLICY, CARET_SLOP | (caretMotion == 2 ? CARET_EVEN : 0),
@@ -1250,84 +1392,309 @@ namespace Software::Slate
         call(SCI_SETVISIBLEPOLICY, VISIBLE_SLOP, caretMotion == 0 ? 2 : 4);
         call(SCI_SETPHASESDRAW, SC_PHASES_MULTIPLE, 0);
         call(SCI_SETCARETLINEBACK, caretLine, 0);
-        call(SCI_SETCARETLINEVISIBLE, m_editorSettings.highlightCurrentLine ? 1 : 0, 0);
+        call(SCI_SETCARETLINEVISIBLE, settings.highlightCurrentLine ? 1 : 0, 0);
+        call(SCI_SETCARETLINEVISIBLEALWAYS, 0, 0);
         call(SCI_SETSELBACK, 1, selection);
         call(SCI_SETSELFORE, 1, selectedText);
         call(SCI_HIDESELECTION, 0, 0);
         call(SCI_SETWHITESPACEFORE, 1, muted);
         call(SCI_SETWHITESPACEBACK, 1, background);
-        call(SCI_SETVIEWWS, m_editorSettings.showWhitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE, 0);
+        call(SCI_SETVIEWWS, settings.showWhitespace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE, 0);
         call(SCI_SETWHITESPACESIZE, 2, 0);
         call(SCI_SETTABDRAWMODE, SCTD_LONGARROW, 0);
-        call(SCI_SETWRAPMODE, m_editorSettings.wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE, 0);
-        call(SCI_SETHSCROLLBAR, m_editorSettings.wordWrap ? 0 : 1, 0);
+        call(SCI_SETWRAPMODE, settings.wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE, 0);
+        call(SCI_SETWRAPINDENTMODE, SC_WRAPINDENT_INDENT, 0);
+        call(SCI_SETHSCROLLBAR, settings.wordWrap ? 0 : 1, 0);
         call(SCI_SETVSCROLLBAR, 0, 0);
         call(SCI_SETEXTRAASCENT, extraAscent, 0);
         call(SCI_SETEXTRADESCENT, extraDescent, 0);
-        call(SCI_SETUSETABS, m_editorSettings.indentWithTabs ? 1 : 0, 0);
+        call(SCI_SETUSETABS, settings.indentWithTabs ? 1 : 0, 0);
         call(SCI_SETTABWIDTH, tabWidth, 0);
         call(SCI_SETINDENT, tabWidth, 0);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_DEFAULT, primary);
-        call(SCI_STYLESETBACK, SCE_MARKDOWN_DEFAULT, background);
+        namespace S = LivePreviewStyle;
+        const auto style = [&](int id, COLORREF fore, bool bold = false, bool italic = false) {
+            call(SCI_STYLESETFORE, id, fore);
+            call(SCI_STYLESETBOLD, id, bold ? 1 : 0);
+            call(SCI_STYLESETITALIC, id, italic ? 1 : 0);
+        };
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_LINE_BEGIN, ToColorRef(UI::MarkdownHeading1));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_PRECHAR, ToColorRef(UI::MarkdownBullet));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, ToColorRef(UI::MarkdownTable));
+        style(S::Default, primary);
+        style(S::Markup, markup);
+        style(S::Hidden, background);
+        call(SCI_STYLESETVISIBLE, S::Hidden, 0);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_STRONG1, ToColorRef(UI::MarkdownBold));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_STRONG2, ToColorRef(UI::MarkdownBold));
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_STRONG1, 1);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_STRONG2, 1);
+        style(S::Heading1, ToColorRef(UI::MarkdownHeading1), true);
+        style(S::Heading2, ToColorRef(UI::MarkdownHeading2), true);
+        style(S::Heading3, ToColorRef(UI::MarkdownHeading3), true);
+        style(S::Heading4, ToColorRef(UI::MarkdownHeading3));
+        style(S::Heading5, ToColorRef(UI::MarkdownHeading3));
+        style(S::Heading6, ToColorRef(MixColor(UI::MarkdownHeading3, UI::Muted, 0.4f)));
+        if (settings.headingScale)
+        {
+            // Scintilla gives every line the tallest style's height, so scaling is opt-in
+            call(SCI_STYLESETSIZEFRACTIONAL, S::Heading1, fractionalPoints * 150 / 100);
+            call(SCI_STYLESETSIZEFRACTIONAL, S::Heading2, fractionalPoints * 130 / 100);
+            call(SCI_STYLESETSIZEFRACTIONAL, S::Heading3, fractionalPoints * 115 / 100);
+        }
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_EM1, ToColorRef(UI::MarkdownItalic));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_EM2, ToColorRef(UI::MarkdownItalic));
-        call(SCI_STYLESETITALIC, SCE_MARKDOWN_EM1, 1);
-        call(SCI_STYLESETITALIC, SCE_MARKDOWN_EM2, 1);
+        style(S::Bold, ToColorRef(UI::MarkdownBold), true);
+        style(S::Italic, ToColorRef(UI::MarkdownItalic), false, true);
+        style(S::BoldItalic, ToColorRef(UI::MarkdownBold), true, true);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER1, ToColorRef(UI::MarkdownHeading1));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER2, ToColorRef(UI::MarkdownHeading2));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER3, ToColorRef(UI::MarkdownHeading3));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER4, ToColorRef(UI::MarkdownHeading3));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER5, ToColorRef(UI::MarkdownHeading3));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HEADER6, ToColorRef(UI::MarkdownHeading3));
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER1, 0);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER2, 0);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_HEADER3, 0);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER1, editorPointSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER2, editorPointSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER3, editorPointSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER4, editorPointSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER5, editorPointSize);
-        call(SCI_STYLESETSIZE, SCE_MARKDOWN_HEADER6, editorPointSize);
+        style(S::Code, ToColorRef(UI::MarkdownCode));
+        call(SCI_STYLESETBACK, S::Code, panel);
+        style(S::CodeBlock, ToColorRef(UI::MarkdownCode));
+        call(SCI_STYLESETBACK, S::CodeBlock, codeBack);
+        call(SCI_STYLESETEOLFILLED, S::CodeBlock, 1);
+        style(S::Fence, markup);
+        call(SCI_STYLESETBACK, S::Fence, codeBack);
+        call(SCI_STYLESETEOLFILLED, S::Fence, 1);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_ULIST_ITEM, ToColorRef(UI::MarkdownBullet));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_OLIST_ITEM, ToColorRef(UI::MarkdownBullet));
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_ULIST_ITEM, 0);
-        call(SCI_STYLESETBOLD, SCE_MARKDOWN_OLIST_ITEM, 0);
+        style(S::Link, ToColorRef(UI::MarkdownLink));
+        call(SCI_STYLESETUNDERLINE, S::Link, settings.linkUnderline ? 1 : 0);
+        call(SCI_STYLESETHOTSPOT, S::Link, 1);
+        style(S::Url, ToColorRef(MixColor(UI::MarkdownLink, UI::Muted, 0.55f)));
+        style(S::WikiLink, ToColorRef(UI::MarkdownLink));
+        call(SCI_STYLESETUNDERLINE, S::WikiLink, settings.linkUnderline ? 1 : 0);
+        call(SCI_STYLESETHOTSPOT, S::WikiLink, 1);
+        style(S::Image, ToColorRef(UI::MarkdownImage), false, true);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_BLOCKQUOTE, ToColorRef(UI::MarkdownQuote));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_LINK, ToColorRef(UI::MarkdownLink));
-        call(SCI_STYLESETUNDERLINE, SCE_MARKDOWN_LINK, m_editorSettings.linkUnderline ? 1 : 0);
+        style(S::Bullet, ToColorRef(UI::MarkdownBullet), true);
+        style(S::Task, ToColorRef(UI::MarkdownCheckbox), true);
+        style(S::TaskDone, ToColorRef(UI::MarkdownCheckboxDone), true);
+        style(S::DoneText, muted);
+        style(S::Quote, ToColorRef(UI::MarkdownQuote), false, true);
+        style(S::QuoteMarker, ToColorRef(MixColor(UI::MarkdownQuote, UI::Background, 0.35f)), true);
+        style(S::Callout, ToColorRef(UI::Cyan), true);
+        style(S::Rule, markup);
+        style(S::Table, ToColorRef(UI::MarkdownTable));
+        style(S::Frontmatter, ToColorRef(MixColor(UI::Muted, UI::Background, 0.2f)));
+        call(SCI_STYLESETBACK, S::Frontmatter, codeBack);
+        call(SCI_STYLESETEOLFILLED, S::Frontmatter, 1);
+        style(S::Tag, ToColorRef(UI::Cyan));
+        style(S::Strike, muted);
+        style(S::Highlight, primary);
+        call(SCI_STYLESETBACK, S::Highlight, highlightBack);
+        style(S::Comment, markup, false, true);
 
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_CODE, ToColorRef(UI::MarkdownCode));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_CODE2, ToColorRef(UI::MarkdownCode));
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_CODEBK, ToColorRef(UI::MarkdownCode));
-        call(SCI_STYLESETBACK, SCE_MARKDOWN_CODE, panel);
-        call(SCI_STYLESETBACK, SCE_MARKDOWN_CODE2, panel);
-        call(SCI_STYLESETBACK, SCE_MARKDOWN_CODEBK, panel);
-        call(SCI_STYLESETEOLFILLED, SCE_MARKDOWN_CODEBK, 1);
-
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_STRIKEOUT, muted);
-        call(SCI_STYLESETFORE, SCE_MARKDOWN_HRULE, ToColorRef(UI::MarkdownTable));
+        call(SCI_INDICSETFORE, S::StrikeIndicator, muted);
+        call(SCI_SETHOTSPOTACTIVEUNDERLINE, 1, 0);
+        call(SCI_SETHOTSPOTSINGLELINE, 1, 0);
 
         call(SCI_CALLTIPSETBACK, panel, 0);
         call(SCI_CALLTIPSETFORE, primary, 0);
         call(SCI_CALLTIPSETFOREHLT, ToColorRef(UI::Cyan), 0);
         call(SCI_CALLTIPUSESTYLE, 16, 0);
-
-        call(SCI_COLOURISE, 0, -1);
 #endif
+    }
+
+    void ScintillaEditorHost::UpdateReveal()
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return;
+        }
+
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const bool hide = m_editorSettings.livePreview;
+        if (hide != m_hideMarkupApplied)
+        {
+            m_hideMarkupApplied = hide;
+            m_livePreview.SetHideMarkup(hide);
+            ::SendMessageW(window, SCI_COLOURISE, 0, -1);
+        }
+
+        // Every line touched by any selection shows its markup, so edits never hit read-only hidden text
+        long long first = -1;
+        long long last = -1;
+        const auto selections = static_cast<int>(::SendMessageW(window, SCI_GETSELECTIONS, 0, 0));
+        for (int index = 0; index < selections; ++index)
+        {
+            const auto start = ::SendMessageW(window, SCI_GETSELECTIONNSTART, static_cast<WPARAM>(index), 0);
+            const auto end = ::SendMessageW(window, SCI_GETSELECTIONNEND, static_cast<WPARAM>(index), 0);
+            const auto startLine = static_cast<long long>(::SendMessageW(window, SCI_LINEFROMPOSITION, static_cast<WPARAM>(start), 0));
+            const auto endLine = static_cast<long long>(::SendMessageW(window, SCI_LINEFROMPOSITION, static_cast<WPARAM>(end), 0));
+            first = first < 0 ? startLine : std::min(first, startLine);
+            last = std::max(last, endLine);
+        }
+
+        if (first == m_revealFirst && last == m_revealLast)
+        {
+            return;
+        }
+
+        const long long oldFirst = m_revealFirst;
+        const long long oldLast = m_revealLast;
+        m_revealFirst = first;
+        m_revealLast = last;
+        m_livePreview.SetRevealRange(first, last);
+        if (oldFirst >= 0)
+        {
+            RestyleLines(oldFirst, oldLast);
+        }
+        RestyleLines(first, last);
+#endif
+    }
+
+    void ScintillaEditorHost::RevealRangeForEdit(std::intptr_t start, std::intptr_t end)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return;
+        }
+
+        UpdateReveal();
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const auto firstLine = static_cast<long long>(::SendMessageW(window, SCI_LINEFROMPOSITION, static_cast<WPARAM>(start), 0));
+        const auto lastLine = static_cast<long long>(::SendMessageW(window, SCI_LINEFROMPOSITION, static_cast<WPARAM>(end), 0));
+        if (firstLine >= m_revealFirst && lastLine <= m_revealLast)
+        {
+            return;
+        }
+
+        // Widen the reveal for this edit; the next UpdateReveal narrows it back to the selection
+        m_revealFirst = std::min(m_revealFirst < 0 ? firstLine : m_revealFirst, firstLine);
+        m_revealLast = std::max(m_revealLast, lastLine);
+        m_livePreview.SetRevealRange(m_revealFirst, m_revealLast);
+        RestyleLines(firstLine, lastLine);
+#else
+        (void)start;
+        (void)end;
+#endif
+    }
+
+    void ScintillaEditorHost::RestyleLines(long long firstLine, long long lastLine)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow || firstLine < 0)
+        {
+            return;
+        }
+
+        // Lines past the styled end will be lexed with the new reveal range anyway
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const auto endStyled = static_cast<sptr_t>(::SendMessageW(window, SCI_GETENDSTYLED, 0, 0));
+        const auto start = static_cast<sptr_t>(::SendMessageW(window, SCI_POSITIONFROMLINE, static_cast<WPARAM>(firstLine), 0));
+        if (start < 0 || start >= endStyled)
+        {
+            return;
+        }
+        auto end = static_cast<sptr_t>(::SendMessageW(window, SCI_POSITIONFROMLINE, static_cast<WPARAM>(lastLine + 1), 0));
+        if (end < 0)
+        {
+            end = static_cast<sptr_t>(::SendMessageW(window, SCI_GETLENGTH, 0, 0));
+        }
+        ::SendMessageW(window, SCI_COLOURISE, static_cast<WPARAM>(start), static_cast<LPARAM>(std::min(end, endStyled)));
+#else
+        (void)firstLine;
+        (void)lastLine;
+#endif
+    }
+
+    bool ScintillaEditorHost::HandleClick(int x, int y, bool ctrl)
+    {
+#if defined(_WIN32)
+        if (!m_editorWindow)
+        {
+            return false;
+        }
+
+        const auto window = static_cast<HWND>(m_editorWindow);
+        const auto position = static_cast<sptr_t>(::SendMessageW(window, SCI_CHARPOSITIONFROMPOINTCLOSE, static_cast<WPARAM>(x), y));
+        if (position < 0)
+        {
+            return false;
+        }
+
+        const auto style = static_cast<int>(::SendMessageW(window, SCI_GETSTYLEAT, static_cast<WPARAM>(position), 0));
+        const auto line = static_cast<sptr_t>(::SendMessageW(window, SCI_LINEFROMPOSITION, static_cast<WPARAM>(position), 0));
+        const auto lineStart = static_cast<sptr_t>(::SendMessageW(window, SCI_POSITIONFROMLINE, static_cast<WPARAM>(line), 0));
+        const auto lineLength = static_cast<sptr_t>(::SendMessageW(window, SCI_LINELENGTH, static_cast<WPARAM>(line), 0));
+        std::string lineText(static_cast<std::size_t>(lineLength) + 1, '\0');
+        ::SendMessageW(window, SCI_GETLINE, static_cast<WPARAM>(line), reinterpret_cast<LPARAM>(lineText.data()));
+        lineText = StripLineEnding(lineText);
+        const auto column = static_cast<std::size_t>(position - lineStart);
+
+        namespace S = LivePreviewStyle;
+        std::size_t markColumn = 0;
+        if (!ctrl && (style == S::Task || style == S::TaskDone) && TaskMarkAt(lineText, column, &markColumn))
+        {
+            // Toggling only touches the visible mark, so hidden markup elsewhere on the line is safe
+            const char replacement = lineText[markColumn] == ' ' ? 'x' : ' ';
+            const char text[2] = {replacement, '\0'};
+            const sptr_t markPosition = lineStart + static_cast<sptr_t>(markColumn);
+            ::SendMessageW(window, SCI_SETTARGETRANGE, static_cast<WPARAM>(markPosition), markPosition + 1);
+            ::SendMessageW(window, SCI_REPLACETARGET, 1, reinterpret_cast<LPARAM>(text));
+            return true;
+        }
+
+        if (ctrl && (style == S::Link || style == S::WikiLink || style == S::Url || style == S::Image || style == S::Markup))
+        {
+            std::string target;
+            bool wiki = false;
+            if (LinkTargetAt(lineText, column, &target, &wiki) && !target.empty())
+            {
+                m_pendingLink = target;
+                m_pendingLinkIsWiki = wiki;
+                m_pendingCommands |= CommandMask(NativeEditorCommand::OpenLink);
+                return true;
+            }
+        }
+        return false;
+#else
+        (void)x;
+        (void)y;
+        (void)ctrl;
+        return false;
+#endif
+    }
+
+    bool ScintillaEditorHost::ConsumeOpenLink(std::string* target, bool* isWikiLink)
+    {
+        if (m_pendingLink.empty())
+        {
+            return false;
+        }
+        if (target)
+        {
+            *target = m_pendingLink;
+        }
+        if (isWikiLink)
+        {
+            *isWikiLink = m_pendingLinkIsWiki;
+        }
+        m_pendingLink.clear();
+        return true;
+    }
+
+    void ScintillaEditorHost::SetChordBindings(const std::vector<NativeChordBinding>& bindings)
+    {
+        const auto same = [](const NativeChordBinding& lhs, const NativeChordBinding& rhs) {
+            return lhs.imguiKey == rhs.imguiKey && lhs.ctrl == rhs.ctrl && lhs.shift == rhs.shift && lhs.alt == rhs.alt &&
+                   lhs.command == rhs.command && lhs.commandLine == rhs.commandLine;
+        };
+        if (bindings.size() == m_chords.size() && std::equal(bindings.begin(), bindings.end(), m_chords.begin(), same))
+        {
+            return;
+        }
+        m_chords = bindings;
+    }
+
+    bool ScintillaEditorHost::ConsumeChordCommand(std::string* commandLine)
+    {
+        if (m_pendingChordCommands.empty())
+        {
+            return false;
+        }
+        if (commandLine)
+        {
+            *commandLine = m_pendingChordCommands.front();
+        }
+        m_pendingChordCommands.erase(m_pendingChordCommands.begin());
+        return true;
     }
 
     void ScintillaEditorHost::UpdateGeometry(float screenX, float screenY, float width, float height)
@@ -1431,6 +1798,15 @@ namespace Software::Slate
     {
         const bool ctrlPressed = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
         const bool altPressed = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+        if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_CHAR)
+        {
+            UpdateReveal();
+        }
+        if (message == WM_LBUTTONDOWN && HandleClick(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)), ctrlPressed))
+        {
+            ::SetFocus(static_cast<HWND>(window));
+            return 0;
+        }
         if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
         {
             if (altPressed && !ctrlPressed && wParam == VK_LEFT)
@@ -1443,25 +1819,25 @@ namespace Software::Slate
                 m_pendingCommands |= CommandMask(NativeEditorCommand::NavigateForward);
                 return 0;
             }
-            if (ctrlPressed && (wParam == 'S' || wParam == 's'))
+            if (ctrlPressed || altPressed || (wParam >= VK_F1 && wParam <= VK_F12))
             {
-                m_pendingCommands |= CommandMask(NativeEditorCommand::Save);
-                return 0;
-            }
-            if (ctrlPressed && (wParam == 'F' || wParam == 'f'))
-            {
-                m_pendingCommands |= CommandMask(NativeEditorCommand::Find);
-                return 0;
-            }
-            if (ctrlPressed && (wParam == 'O' || wParam == 'o'))
-            {
-                m_pendingCommands |= CommandMask(NativeEditorCommand::Outline);
-                return 0;
-            }
-            if (ctrlPressed && (wParam == 'P' || wParam == 'p'))
-            {
-                m_pendingCommands |= CommandMask(NativeEditorCommand::Preview);
-                return 0;
+                const bool shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                for (const auto& chord : m_chords)
+                {
+                    if (VirtualKeyFromImGuiKey(chord.imguiKey) == static_cast<int>(wParam) && chord.ctrl == ctrlPressed &&
+                        chord.alt == altPressed && chord.shift == shiftDown)
+                    {
+                        if (chord.command != 0)
+                        {
+                            m_pendingCommands |= chord.command;
+                        }
+                        else
+                        {
+                            m_pendingChordCommands.push_back(chord.commandLine);
+                        }
+                        return 0;
+                    }
+                }
             }
             if (m_editorSettings.pasteClipboardImages &&
                 ctrlPressed && (wParam == 'V' || wParam == 'v') &&

@@ -1,0 +1,9 @@
+{
+  "id": "daily-tools",
+  "name": "Daily Tools",
+  "version": "1.0.0",
+  "description": "Date slash commands and a jump to yesterday's journal",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

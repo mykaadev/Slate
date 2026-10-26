@@ -77,6 +77,9 @@ namespace Software::Core::Runtime
         /** Registers or replaces a command definition. */
         void Register(CommandDefinition definition);
 
+        /** Removes one command and its aliases. Returns false when the id is unknown. */
+        bool Unregister(const std::string& id);
+
         /** Removes all registered commands and aliases. */
         void Clear();
 

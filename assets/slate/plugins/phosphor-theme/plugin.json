@@ -1,0 +1,9 @@
+{
+  "id": "phosphor-theme",
+  "name": "Phosphor Theme",
+  "version": "1.0.0",
+  "description": "A green-on-black terminal palette. Mods can ship themes without any code.",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

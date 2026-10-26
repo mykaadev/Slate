@@ -103,6 +103,10 @@ namespace Software::Modes::Slate
             std::string buffer;
             bool focus = false;
             PromptCallback callback;
+            // Command prompts show matching commands and complete with tab
+            bool commandMode = false;
+            int selected = 0;
+            std::string lastQuery;
         };
 
         struct ConfirmState
@@ -123,6 +127,8 @@ namespace Software::Modes::Slate
         void DrawPromptOverlay(Software::Core::Runtime::AppContext& context);
         void DrawConfirmOverlay(Software::Core::Runtime::AppContext& context);
         void DrawStatusLine(Software::Core::Runtime::AppContext& context);
+        void DrawCommandSuggestions(Software::Core::Runtime::AppContext& context, const ImVec2& promptPos, float width);
+        void ProcessShellRequests(Software::Core::Runtime::AppContext& context);
         std::string HelperText(const Software::Core::Runtime::AppContext& context) const;
         void HandleGlobalKeys(Software::Core::Runtime::AppContext& context);
         void OpenSearchResult(const Software::Slate::SearchOverlaySelection& selection, Software::Core::Runtime::AppContext& context);

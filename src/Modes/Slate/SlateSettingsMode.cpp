@@ -3,6 +3,7 @@
 #include "App/Slate/Editor/EditorSettingsService.h"
 #include "App/Slate/Core/AppPaths.h"
 #include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/Plugins/PluginManager.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/UI/SlateUi.h"
 
@@ -22,6 +23,8 @@ namespace Software::Modes::Slate
         {
             ShellPreset = 0,
             MarkdownPreset,
+            LivePreview,
+            HeadingScale,
             FontSize,
             LineSpacing,
             PageWidth,
@@ -280,7 +283,22 @@ namespace Software::Modes::Slate
         const std::size_t settingsRowCount = static_cast<std::size_t>(SettingsRow::Count);
         const std::size_t shortcutRowOffset = settingsRowCount;
         const auto& shortcutDefinitions = shortcuts.Definitions();
-        const std::size_t totalRows = settingsRowCount + shortcutDefinitions.size();
+        const auto pluginManager = context.services.Resolve<Software::Slate::PluginManager>();
+        const auto plugins = pluginManager ? pluginManager->Plugins() : std::vector<Software::Slate::PluginInfo>{};
+        const std::size_t pluginRowOffset = shortcutRowOffset + shortcutDefinitions.size();
+        const std::size_t totalRows = pluginRowOffset + plugins.size();
+
+        if (ui.settingsJumpToPlugins)
+        {
+            ui.settingsJumpToPlugins = false;
+            ui.navigation.SetCount(totalRows);
+            ui.navigation.Reset();
+            for (std::size_t i = 0; i < pluginRowOffset && !plugins.empty(); ++i)
+            {
+                ui.navigation.MoveNext();
+            }
+            m_scrollToSelection = true;
+        }
 
         if (handleInput && !m_shortcutCaptureOpen)
         {
@@ -295,7 +313,25 @@ namespace Software::Modes::Slate
             }
 
             const std::size_t selectedRow = ui.navigation.Selected();
-            if (selectedRow >= shortcutRowOffset)
+            if (selectedRow >= pluginRowOffset)
+            {
+                const auto& plugin = plugins[selectedRow - pluginRowOffset];
+                if (shortcuts.AnyPressed({Software::Slate::ShortcutAction::Accept,
+                                          Software::Slate::ShortcutAction::NavigateLeft,
+                                          Software::Slate::ShortcutAction::NavigateRight}))
+                {
+                    std::string error;
+                    if (pluginManager->SetEnabled(plugin.manifest.id, !plugin.enabled, &error))
+                    {
+                        SetStatus(std::string(plugin.enabled ? "disabled " : "enabled ") + plugin.manifest.id);
+                    }
+                    else
+                    {
+                        SetError(error);
+                    }
+                }
+            }
+            else if (selectedRow >= shortcutRowOffset)
             {
                 const std::size_t shortcutIndex = selectedRow - shortcutRowOffset;
                 if (shortcutIndex < shortcutDefinitions.size() && shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
@@ -334,6 +370,16 @@ namespace Software::Modes::Slate
                         Cycle(workspace.Theme().MarkdownPresetIds(), themeSettings.markdownPreset, delta);
                     workspace.SetThemeSettings(themeSettings);
                     saveAppearance();
+                    break;
+                case SettingsRow::LivePreview:
+                    editorSettings.livePreview = !editorSettings.livePreview;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
+                    break;
+                case SettingsRow::HeadingScale:
+                    editorSettings.headingScale = !editorSettings.headingScale;
+                    workspace.SetEditorSettings(editorSettings);
+                    saveEditor();
                     break;
                 case SettingsRow::FontSize:
                     editorSettings.fontSize = CycleNamedOption(FontSizeOptions(), editorSettings.fontSize, delta);
@@ -487,6 +533,10 @@ namespace Software::Modes::Slate
 
         ImGui::Dummy(ImVec2(1.0f, 10.0f));
         ImGui::TextColored(Muted, "editor");
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::LivePreview),
+                       "live preview", OnOffLabel(editorSettings.livePreview));
+        DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::HeadingScale),
+                       "heading scale", OnOffLabel(editorSettings.headingScale));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::FontSize),
                        "font size", LabelForNamedOption(FontSizeOptions(), editorSettings.fontSize));
         DrawSettingRow(ui.navigation.Selected() == static_cast<std::size_t>(SettingsRow::LineSpacing),
@@ -536,6 +586,61 @@ namespace Software::Modes::Slate
             const bool selected = ui.navigation.Selected() == shortcutRowOffset + i;
             const std::string label = std::string(definition.group) + ": " + definition.label;
             DrawSettingRow(selected, label.c_str(), shortcuts.Label(definition.action));
+        }
+
+        ImGui::Dummy(ImVec2(1.0f, 12.0f));
+        ImGui::TextColored(Muted, "plugins");
+        ImGui::TextColored(Muted, "%s toggles; :plugin new <name> scaffolds one; :plugin folder opens %s",
+                           shortcuts.Label(Software::Slate::ShortcutAction::Accept).c_str(),
+                           Software::Slate::PluginManager::UserPluginDirectory().generic_u8string().c_str());
+        if (plugins.empty())
+        {
+            ImGui::TextColored(Muted, "  no plugins found");
+        }
+        for (std::size_t i = 0; i < plugins.size(); ++i)
+        {
+            const auto& plugin = plugins[i];
+            const bool selected = ui.navigation.Selected() == pluginRowOffset + i;
+            const char* source = plugin.source == Software::Slate::PluginSource::Bundled     ? "bundled"
+                                 : plugin.source == Software::Slate::PluginSource::Workspace ? "workspace"
+                                 : plugin.source == Software::Slate::PluginSource::UserInit  ? "init"
+                                                                                             : "user";
+            std::string state = !plugin.enabled ? "off" : (plugin.status == Software::Slate::PluginStatus::Failed ? "error" : "on");
+            ImGui::TextColored(selected ? Green : Primary, "%s %-22s ", selected ? ">" : " ", plugin.manifest.name.c_str());
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::TextColored(state == "error" ? Red : (plugin.enabled ? Green : Muted), "%-6s", state.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(Muted, "%s  %s", source, plugin.manifest.version.c_str());
+            if (selected && m_scrollToSelection)
+            {
+                ImGui::SetScrollHereY(0.35f);
+                m_scrollToSelection = false;
+            }
+            if (selected)
+            {
+                if (!plugin.manifest.description.empty())
+                {
+                    ImGui::TextColored(Muted, "    %s", plugin.manifest.description.c_str());
+                }
+                if (!plugin.error.empty())
+                {
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(Red, "    %s", plugin.error.c_str());
+                    ImGui::PopTextWrapPos();
+                }
+                if (!plugin.commands.empty())
+                {
+                    std::string list;
+                    for (const auto& id : plugin.commands)
+                    {
+                        list += (list.empty() ? "" : ", ") + id;
+                    }
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(Muted, "    commands: %s", list.c_str());
+                    ImGui::PopTextWrapPos();
+                }
+                ImGui::TextColored(Muted, "    %s", plugin.directory.generic_u8string().c_str());
+            }
         }
 
         ImGui::Dummy(ImVec2(1.0f, 14.0f));

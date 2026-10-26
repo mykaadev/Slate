@@ -134,21 +134,52 @@ namespace Software::Slate
 
     std::vector<SlashCommandDefinition> SlashCommandService::Filter(std::string_view query)
     {
+        return Filter(query, {});
+    }
+
+    std::vector<SlashCommandDefinition> SlashCommandService::Filter(std::string_view query,
+                                                                    const std::vector<SlashCommandDefinition>& extensions)
+    {
         const std::string lowerQuery = PathUtils::ToLower(std::string(query));
+        const auto matches = [&lowerQuery](const SlashCommandDefinition& command) {
+            return lowerQuery.empty() ||
+                   PathUtils::ToLower(command.id).find(lowerQuery) != std::string::npos ||
+                   PathUtils::ToLower(command.label).find(lowerQuery) != std::string::npos ||
+                   PathUtils::ToLower(command.description).find(lowerQuery) != std::string::npos;
+        };
+
         std::vector<SlashCommandDefinition> filtered;
         for (const auto& command : Commands())
         {
-            const std::string id(command.id);
-            const std::string label(command.label);
-            const std::string description(command.description);
-            if (lowerQuery.empty() ||
-                PathUtils::ToLower(id).find(lowerQuery) != std::string::npos ||
-                PathUtils::ToLower(label).find(lowerQuery) != std::string::npos ||
-                PathUtils::ToLower(description).find(lowerQuery) != std::string::npos)
+            if (matches(command))
             {
                 filtered.push_back(command);
             }
         }
+        for (const auto& command : extensions)
+        {
+            const bool shadowsBuiltIn = std::any_of(Commands().begin(), Commands().end(), [&](const SlashCommandDefinition& builtIn) {
+                return builtIn.id == command.id;
+            });
+            if (!shadowsBuiltIn && matches(command))
+            {
+                filtered.push_back(command);
+            }
+        }
+
+        // Exact and prefix matches float to the top so typing the full token always selects it
+        std::stable_sort(filtered.begin(), filtered.end(), [&lowerQuery](const SlashCommandDefinition& lhs,
+                                                                         const SlashCommandDefinition& rhs) {
+            const auto rank = [&lowerQuery](const SlashCommandDefinition& command) {
+                const std::string id = PathUtils::ToLower(command.id);
+                if (id == lowerQuery)
+                {
+                    return 0;
+                }
+                return id.rfind(lowerQuery, 0) == 0 ? 1 : 2;
+            };
+            return rank(lhs) < rank(rhs);
+        });
         return filtered;
     }
 
@@ -177,6 +208,8 @@ namespace Software::Slate
             return "[label](url)";
         case SlashCommandKind::Todo:
             return "/todo";
+        case SlashCommandKind::Extension:
+            return {};
         }
         return {};
     }

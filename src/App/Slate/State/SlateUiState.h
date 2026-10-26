@@ -119,5 +119,7 @@ namespace Software::Slate
         bool folderPickerActive = false;
         // Stores the current folder picker action
         FolderPickerAction folderPickerAction = FolderPickerAction::None;
+        // Asks the settings screen to select the plugin section on its next frame
+        bool settingsJumpToPlugins = false;
     };
 }

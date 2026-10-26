@@ -8,7 +8,7 @@ namespace Software::Slate
 {
     struct EditorSettings
     {
-        int fontSize = 12;
+        int fontSize = 16;
         int lineSpacing = 3;
         int pageWidth = 980;
         bool wordWrap = true;
@@ -27,6 +27,12 @@ namespace Software::Slate
         bool autoListContinuation = true;
         bool pasteClipboardImages = true;
         int imageStoragePolicy = static_cast<int>(ImageStoragePolicy::SubfolderUnderNoteFolder);
+        // Renders Markdown in place and hides syntax away from the caret line
+        bool livePreview = true;
+        // Draws headings larger than body text; Scintilla grows every line to the tallest style
+        bool headingScale = false;
+        // Editor font family; must be installed on the system
+        std::string fontFamily = "Cascadia Mono";
     };
 
     class EditorSettingsService

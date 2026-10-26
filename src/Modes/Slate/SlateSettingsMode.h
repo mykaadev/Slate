@@ -22,5 +22,6 @@ namespace Software::Modes::Slate
         bool m_shortcutCaptureArmed = false;
         Software::Slate::ShortcutAction m_shortcutCaptureAction = Software::Slate::ShortcutAction::Count;
         std::string m_shortcutCaptureLabel;
+        bool m_scrollToSelection = false;
     };
 }

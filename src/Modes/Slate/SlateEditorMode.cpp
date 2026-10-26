@@ -1,5 +1,14 @@
 #include "Modes/Slate/SlateEditorMode.h"
 
+#include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
+
+#if defined(_WIN32)
+#define NOMINMAX
+#include <Windows.h>
+#include <shellapi.h>
+#endif
+
 #include "App/Slate/Editor/EditorSettingsService.h"
 #include "App/Slate/Core/PathUtils.h"
 #include "App/Slate/Editor/SlateEditorContext.h"
@@ -475,6 +484,7 @@ namespace Software::Modes::Slate
         auto& ui = UiState(context);
         const auto& editorSettings = workspace.CurrentEditorSettings();
         editor.SetNativeEditorSettings(editorSettings);
+        SyncNativeChords(context);
         if (!workspace.HasWorkspaceLoaded())
         {
             ShowWorkspaceSetup(context);
@@ -546,7 +556,7 @@ namespace Software::Modes::Slate
                 return std::vector<Software::Slate::SlashCommandDefinition>{};
             }
 
-            auto commands = Software::Slate::SlashCommandService::Filter(query);
+            auto commands = Software::Slate::SlashCommandService::Filter(query, ExtensionSlashCommands(context));
             if (query != m_slashCommandQuery)
             {
                 m_slashCommandQuery = query;
@@ -571,7 +581,7 @@ namespace Software::Modes::Slate
             }
             return ApplySlashCommand(context,
                                      *document,
-                                     commands[static_cast<std::size_t>(m_slashCommandIndex)].kind);
+                                     commands[static_cast<std::size_t>(m_slashCommandIndex)]);
         };
 
         const auto toggleOutlinePanel = [&]() {
@@ -672,6 +682,27 @@ namespace Software::Modes::Slate
                 if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Save))
                 {
                     SaveActiveDocument(context);
+                }
+                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::OpenLink))
+                {
+                    std::string target;
+                    bool isWikiLink = false;
+                    if (editor.ConsumeNativeOpenLink(&target, &isWikiLink))
+                    {
+                        OpenLinkTarget(context, target, isWikiLink);
+                        return;
+                    }
+                }
+                std::string chordCommand;
+                while (editor.ConsumeNativeChordCommand(&chordCommand))
+                {
+                    if (chordCommand == "__palette")
+                    {
+                        editor.ReleaseNativeEditorFocus();
+                        BeginCommandPrompt();
+                        return;
+                    }
+                    HandleCommand(chordCommand, context);
                 }
                 if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Find) &&
                     workspace.Documents().HasOpenDocument())
@@ -1068,7 +1099,7 @@ namespace Software::Modes::Slate
             m_slashCommandSuppressedQuery.clear();
         }
 
-        auto commands = Software::Slate::SlashCommandService::Filter(query);
+        auto commands = Software::Slate::SlashCommandService::Filter(query, ExtensionSlashCommands(context));
         if (query != m_slashCommandQuery)
         {
             m_slashCommandQuery = query;
@@ -1175,7 +1206,7 @@ namespace Software::Modes::Slate
             {
                 ApplySlashCommand(context,
                                   *WorkspaceContext(context).Documents().Active(),
-                                  commands[commandIndex].kind);
+                                  commands[commandIndex]);
             }
             ImGui::PopID();
         }
@@ -1184,10 +1215,144 @@ namespace Software::Modes::Slate
         ImGui::PopStyleColor(2);
     }
 
+    void SlateEditorMode::SyncNativeChords(Software::Core::Runtime::AppContext& context)
+    {
+        auto& shortcuts = WorkspaceContext(context).Shortcuts();
+        std::vector<Software::Slate::NativeChordBinding> chords;
+
+        // Plain keys must keep typing text, so only modifier chords and function keys are intercepted
+        const auto add = [&chords](const Software::Slate::KeyBinding& binding, std::uint32_t command, std::string line) {
+            const bool functionKey = binding.key >= ImGuiKey_F1 && binding.key <= ImGuiKey_F12;
+            if (binding.key == ImGuiKey_None || (!binding.ctrl && !binding.alt && !functionKey))
+            {
+                return;
+            }
+            Software::Slate::NativeChordBinding chord;
+            chord.imguiKey = binding.key;
+            chord.ctrl = binding.ctrl;
+            chord.shift = binding.shift;
+            chord.alt = binding.alt;
+            chord.command = command;
+            chord.commandLine = std::move(line);
+            chords.push_back(std::move(chord));
+        };
+        const auto builtIn = [&](Software::Slate::ShortcutAction action, Software::Slate::NativeEditorCommand command) {
+            add(shortcuts.Binding(action), static_cast<std::uint32_t>(command), {});
+        };
+        builtIn(Software::Slate::ShortcutAction::EditorSave, Software::Slate::NativeEditorCommand::Save);
+        builtIn(Software::Slate::ShortcutAction::EditorFind, Software::Slate::NativeEditorCommand::Find);
+        builtIn(Software::Slate::ShortcutAction::EditorOutline, Software::Slate::NativeEditorCommand::Outline);
+        builtIn(Software::Slate::ShortcutAction::EditorPreview, Software::Slate::NativeEditorCommand::Preview);
+        add(shortcuts.Binding(Software::Slate::ShortcutAction::CommandPalette), 0, "__palette");
+        add(Software::Slate::KeyBinding{ImGuiKey_P, true, true, false}, 0, "__palette");
+
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
+        {
+            for (const auto& binding : registry->KeyBindings())
+            {
+                add(binding.binding, 0, binding.command);
+            }
+        }
+        EditorContext(context).SetNativeChordBindings(chords);
+    }
+
+    void SlateEditorMode::OpenLinkTarget(Software::Core::Runtime::AppContext& context, const std::string& rawTarget, bool isWikiLink)
+    {
+        auto& workspace = WorkspaceContext(context);
+        const std::string lower = Software::Slate::PathUtils::ToLower(rawTarget);
+        if (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0 || lower.rfind("mailto:", 0) == 0)
+        {
+#if defined(_WIN32)
+            ::ShellExecuteW(nullptr, L"open", Software::Slate::fs::u8path(rawTarget).wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+            SetStatus("opened " + rawTarget);
+            return;
+        }
+
+        std::string target = rawTarget.substr(0, rawTarget.find('#'));
+        for (std::size_t pos = target.find("%20"); pos != std::string::npos; pos = target.find("%20"))
+        {
+            target.replace(pos, 3, " ");
+        }
+        if (target.empty())
+        {
+            return;
+        }
+
+        const auto* document = workspace.Documents().Active();
+        const Software::Slate::fs::path folder = document ? document->relativePath.parent_path() : Software::Slate::fs::path();
+
+        if (isWikiLink)
+        {
+            // Wiki links match a note name anywhere, or a workspace relative path
+            const std::string wanted = Software::Slate::PathUtils::ToLower(target);
+            for (const auto& file : workspace.Workspace().MarkdownFiles())
+            {
+                const std::string stem = Software::Slate::PathUtils::ToLower(file.stem().u8string());
+                std::string relative = Software::Slate::PathUtils::ToLower(file.generic_u8string());
+                if (relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".md") == 0)
+                {
+                    relative.resize(relative.size() - 3);
+                }
+                if (stem == wanted || relative == wanted)
+                {
+                    OpenDocument(file, context);
+                    return;
+                }
+            }
+
+            Software::Slate::fs::path created;
+            std::string error;
+            if (!workspace.CreateNewNote(folder.empty() ? Software::Slate::fs::path(".") : folder, target, &created, &error))
+            {
+                SetError(error);
+                return;
+            }
+            OpenDocument(created, context);
+            SetStatus("created " + created.generic_u8string());
+            return;
+        }
+
+        const Software::Slate::fs::path relative = (folder / Software::Slate::fs::u8path(target)).lexically_normal();
+        const Software::Slate::fs::path absolute = workspace.Workspace().Resolve(relative);
+        std::error_code ec;
+        if (Software::Slate::fs::exists(absolute, ec))
+        {
+            if (Software::Slate::PathUtils::ToLower(relative.extension().u8string()) == ".md")
+            {
+                OpenDocument(relative, context);
+            }
+            else
+            {
+#if defined(_WIN32)
+                ::ShellExecuteW(nullptr, L"open", absolute.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+            }
+            return;
+        }
+        SetError("link target not found: " + target);
+    }
+
+    std::vector<Software::Slate::SlashCommandDefinition> SlateEditorMode::ExtensionSlashCommands(
+        Software::Core::Runtime::AppContext& context) const
+    {
+        std::vector<Software::Slate::SlashCommandDefinition> commands;
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
+        {
+            for (const auto& command : registry->SlashCommands())
+            {
+                commands.push_back({command.id, command.label, command.description,
+                                    Software::Slate::SlashCommandKind::Extension});
+            }
+        }
+        return commands;
+    }
+
     bool SlateEditorMode::ApplySlashCommand(Software::Core::Runtime::AppContext& context,
                                             Software::Slate::DocumentService::Document& document,
-                                            Software::Slate::SlashCommandKind kind)
+                                            const Software::Slate::SlashCommandDefinition& command)
     {
+        const Software::Slate::SlashCommandKind kind = command.kind;
         auto& workspace = WorkspaceContext(context);
         auto& editor = EditorContext(context);
         const auto& editorSettings = workspace.CurrentEditorSettings();
@@ -1247,6 +1412,40 @@ namespace Software::Modes::Slate
             }
         }
 
+        if (kind == Software::Slate::SlashCommandKind::Extension)
+        {
+            const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+            const auto* extension = registry ? registry->FindSlashCommand(command.id) : nullptr;
+            if (!extension || !extension->run)
+            {
+                return false;
+            }
+
+            // Copy first: the plugin may re-register its commands while running
+            const auto run = extension->run;
+            std::string replacement;
+            std::string error;
+            if (!run(&replacement, &error))
+            {
+                SetError(error);
+                return false;
+            }
+
+            std::string normalized;
+            for (const char ch : replacement)
+            {
+                if (ch == '\n')
+                {
+                    normalized += document.lineEnding;
+                }
+                else if (ch != '\r')
+                {
+                    normalized.push_back(ch);
+                }
+            }
+            return editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(normalized), context.frame.elapsedSeconds);
+        }
+
         const std::string replacement = Software::Slate::SlashCommandService::BuildMarkdownTemplate(kind, document.lineEnding);
         if (replacement.empty())
         {
@@ -1282,6 +1481,7 @@ namespace Software::Modes::Slate
                 SetStatus("inserted link");
                 break;
             case Software::Slate::SlashCommandKind::Todo:
+            case Software::Slate::SlashCommandKind::Extension:
                 break;
             }
         }
@@ -1659,7 +1859,7 @@ namespace Software::Modes::Slate
                                          editor.ActiveLineText(),
                                          static_cast<std::size_t>(std::max(0, editor.CaretColumn())),
                                          &slashQuery)
-                                         ? Software::Slate::SlashCommandService::Filter(slashQuery)
+                                         ? Software::Slate::SlashCommandService::Filter(slashQuery, ExtensionSlashCommands(context))
                                          : std::vector<Software::Slate::SlashCommandDefinition>{};
                 if (slashQuery != m_slashCommandQuery)
                 {
@@ -1701,7 +1901,7 @@ namespace Software::Modes::Slate
                     {
                         ApplySlashCommand(context,
                                           document,
-                                          slashCommands[static_cast<std::size_t>(m_slashCommandIndex)].kind);
+                                          slashCommands[static_cast<std::size_t>(m_slashCommandIndex)]);
                         ImGui::EndGroup();
                         ImGui::PopID();
                         break;

@@ -92,6 +92,8 @@ namespace Software::Slate
         void SetWorkspaceRoot(fs::path workspaceRoot);
         // Returns the theme settings path
         fs::path SettingsPath() const;
+        // Adds preset roots contributed by plugins; each root holds shell/ and markdown/ folders
+        void SetExtraPresetRoots(std::vector<fs::path> roots);
 
         // Loads theme settings from disk
         bool Load(ThemeSettings* out, std::string* error = nullptr) const;
@@ -121,6 +123,8 @@ namespace Software::Slate
 
         // Stores the workspace root
         fs::path m_workspaceRoot;
+        // Stores plugin preset roots loaded after bundled presets
+        std::vector<fs::path> m_extraPresetRoots;
         // Marks whether presets are already loaded
         mutable bool m_presetsLoaded = false;
         // Stores loaded shell presets
