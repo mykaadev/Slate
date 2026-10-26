@@ -27,7 +27,7 @@ namespace Software::Slate
         /** Shows the todo list overlay. */
         std::function<void()> showTodos;
         /** Activates the settings route. */
-        std::function<void()> showSettings;
+        std::function<void(const std::string& section)> showSettings;
         /** Activates the file browser route. */
         std::function<void()> showFiles;
         /** Shows the search overlay and optionally seeds its query. */
@@ -36,6 +36,10 @@ namespace Software::Slate
         std::function<void()> showWorkspaceSetup;
         /** Opens a workspace root path. */
         std::function<bool(const std::string& root)> openWorkspace;
+        /** Shows the keyboard help screen. */
+        std::function<void()> showHelp;
+        /** Opens the command palette. */
+        std::function<void()> showPalette;
     };
 
     /** Result returned by the Slate command dispatcher. */

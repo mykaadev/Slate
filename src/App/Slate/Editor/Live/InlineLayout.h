@@ -63,6 +63,8 @@ namespace Software::Slate::Live
         float lineGap = 4.0f;
         // Draw headings larger than body text
         bool headingScale = true;
+        // Underline links; drawing only, so it is not part of the layout cache key
+        bool linkUnderline = true;
         // Added to every atom offset, so callout bodies keep source offsets
         std::uint32_t offsetBase = 0;
     };

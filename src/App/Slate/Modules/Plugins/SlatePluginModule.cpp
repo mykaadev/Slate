@@ -11,6 +11,7 @@
 #include "Core/Runtime/CommandRegistry.h"
 #include "Core/Runtime/ServiceLocator.h"
 #include "Core/Runtime/ToolRegistry.h"
+#include "Platform/PlatformWindowService.h"
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -86,7 +87,7 @@ namespace Software::Slate::Modules
             [](AppContext& app, const CommandRequest& request) {
                 if (const auto ui = app.services.Resolve<Software::Slate::SlateUiState>())
                 {
-                    ui->settingsJumpToPlugins = true;
+                    ui->settingsSection = "plugins";
                 }
                 if (const auto bridge = app.services.Resolve<Software::Slate::SlateShellBridge>())
                 {
@@ -200,6 +201,18 @@ namespace Software::Slate::Modules
                     ui->sidebarOpen = true;
                 }
                 return CommandResult::Handled(request.id);
+            }));
+
+        context.commands.Register(MakeCommand(
+            "slate.dev.capture", "Capture Screen", "Save the next frame as a BMP image.", {"capture"}, true,
+            [](AppContext& app, const CommandRequest& request) {
+                const auto window = app.services.Resolve<Software::Platform::PlatformWindowService>();
+                const std::string path = request.arguments.empty() ? std::string("slate-capture.bmp") : request.arguments;
+                if (!window || !window->RequestCapture(path))
+                {
+                    return CommandResult::Failed(request.id, "capture is not available");
+                }
+                return CommandResult::Handled(request.id, "captured " + path);
             }));
 
         context.commands.Register(MakeCommand(

@@ -49,8 +49,10 @@ namespace Software::Core::App
         // Carries shared state through the app
         Software::Core::Runtime::AppContext context{services, tools, events, commands, {}, false, &droppedFiles};
         Software::Core::Runtime::ModuleContext moduleContext{services, tools, events, commands, context};
-        services.Register<Software::Platform::PlatformWindowService>(
-            std::make_shared<Software::Platform::PlatformWindowService>(platform.NativeWindowHandle()));
+        auto windowService = std::make_shared<Software::Platform::PlatformWindowService>(platform.NativeWindowHandle());
+        windowService->SetCaptureHandler([&platform](const std::string& path) { platform.RequestCapture(path); });
+        windowService->SetFontHandler([&platform](const std::string& family) { platform.RequestFontFamily(family); });
+        services.Register<Software::Platform::PlatformWindowService>(windowService);
         Software::App::DefaultModules::Register(modules, moduleContext, context);
         modules.StartAll(moduleContext);
 

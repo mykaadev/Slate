@@ -1,4 +1,5 @@
 #include "App/Slate/UI/SlateUi.h"
+#include "App/Slate/UI/SlateDesign.h"
 
 #include "App/Slate/Markdown/MarkdownService.h"
 #include "App/Slate/Core/PathUtils.h"
@@ -566,48 +567,80 @@ namespace Software::Slate::UI
 
     void TextLine(const char* key, const char* label)
     {
-        ImGui::TextColored(Amber, "(%s)", key);
-        ImGui::SameLine();
-        ImGui::TextColored(Primary, "%s", label);
+        KeyHint(key, label, Amber);
+    }
+
+    namespace
+    {
+        // Hint text uses "(key) label   (key) label"; keys render as keycaps, labels as text
+        template <typename Visit>
+        float LayoutShortcutText(std::string_view text, Visit&& visit)
+        {
+            float x = 0.0f;
+            bool previousWasKey = false;
+            ForEachShortcutSegment(text, [&](std::string_view segment, bool isKey) {
+                if (segment.empty())
+                {
+                    return;
+                }
+                if (isKey)
+                {
+                    const std::string_view key = segment.substr(1, segment.size() - 2);
+                    if (x > 0.0f)
+                    {
+                        x += previousWasKey ? 4.0f : 16.0f;
+                    }
+                    visit(key, true, x);
+                    x += KeycapWidth(key);
+                    previousWasKey = true;
+                    return;
+                }
+                std::size_t start = 0;
+                std::size_t end = segment.size();
+                while (start < end && segment[start] == ' ')
+                {
+                    ++start;
+                }
+                while (end > start && segment[end - 1] == ' ')
+                {
+                    --end;
+                }
+                if (start == end)
+                {
+                    return;
+                }
+                const std::string_view label = segment.substr(start, end - start);
+                x += previousWasKey ? 6.0f : (x > 0.0f ? 8.0f : 0.0f);
+                visit(label, false, x);
+                x += ImGui::CalcTextSize(label.data(), label.data() + label.size()).x;
+                previousWasKey = false;
+            });
+            return x;
+        }
     }
 
     float ShortcutTextWidth(std::string_view text)
     {
-        float width = 0.0f;
-        ForEachShortcutSegment(text, [&](std::string_view segment, bool) {
-            if (segment.empty())
-            {
-                return;
-            }
-            width += ImGui::CalcTextSize(segment.data(), segment.data() + segment.size()).x;
-        });
-        return width;
+        return LayoutShortcutText(text, [](std::string_view, bool, float) {});
     }
 
     void DrawShortcutText(std::string_view text, const ImVec4& keyColor, const ImVec4& labelColor)
     {
-        bool first = true;
-        ForEachShortcutSegment(text, [&](std::string_view segment, bool isKey) {
-            if (segment.empty())
+        const ImVec2 start = ImGui::GetCursorScreenPos();
+        const float lineHeight = ImGui::GetTextLineHeight();
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float width = LayoutShortcutText(text, [&](std::string_view part, bool isKey, float x) {
+            if (isKey)
             {
-                return;
+                DrawKeycap(drawList, ImVec2(start.x + x, start.y + (lineHeight - KeycapHeight()) * 0.5f), part, keyColor);
             }
-
-            if (!first)
+            else
             {
-                ImGui::SameLine(0.0f, 0.0f);
+                drawList->AddText(ImVec2(start.x + x, start.y), ImGui::ColorConvertFloat4ToU32(labelColor), part.data(),
+                                  part.data() + part.size());
             }
-
-            ImGui::PushStyleColor(ImGuiCol_Text, isKey ? keyColor : labelColor);
-            ImGui::TextUnformatted(segment.data(), segment.data() + segment.size());
-            ImGui::PopStyleColor();
-            first = false;
         });
-
-        if (first)
-        {
-            ImGui::TextUnformatted("");
-        }
+        ImGui::Dummy(ImVec2(std::max(1.0f, width), lineHeight + 2.0f));
     }
 
     void DrawShortcutTextCentered(std::string_view text, const ImVec4& keyColor, const ImVec4& labelColor)

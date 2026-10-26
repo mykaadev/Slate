@@ -42,9 +42,18 @@ namespace Software::Platform
 
         /** Assigns the callback used to report files dropped onto the window. */
         void SetFileDropCallback(std::function<void(std::vector<std::string>)> callback);
+        // Saves the next rendered frame to a 32-bit BMP file
+        void RequestCapture(std::string path);
+        // Switches the default font to an installed monospace family before the next frame
+        void RequestFontFamily(std::string family);
 
         // Functions
     private:
+        void WritePendingCaptures(int width, int height);
+        void ApplyPendingFont();
+        std::vector<std::string> m_pendingCaptures;
+        std::string m_pendingFontFamily;
+        std::string m_activeFontFamily;
         /** Installs GLFW callbacks for input handling. */
         void InstallCallbacks();
 

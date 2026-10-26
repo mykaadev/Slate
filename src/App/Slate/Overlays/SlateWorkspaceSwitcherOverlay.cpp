@@ -1,6 +1,7 @@
 #include "App/Slate/Overlays/SlateWorkspaceSwitcherOverlay.h"
 
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 
 #include "imgui.h"
@@ -141,42 +142,67 @@ namespace Software::Slate
             return;
         }
 
-        const ImVec2 size(std::min(760.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.58f)),
-                          std::min(460.0f, std::max(240.0f, ImGui::GetWindowHeight() * 0.46f)));
+        const float lineHeight = ImGui::GetTextLineHeight();
+        const float rowHeight = lineHeight * 2.0f + 14.0f;
+        const float listHeight = std::max(1.0f, static_cast<float>(std::min<std::size_t>(vaults.size(), 6))) * (rowHeight + 4.0f);
+        const ImVec2 size(std::min(640.0f, std::max(380.0f, ImGui::GetWindowWidth() * 0.46f)), listHeight + 92.0f);
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
-                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Green.x, Green.y, Green.z, 0.30f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
-        ImGui::BeginChild("WorkspaceOverlay", size, true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
-
-        ImGui::TextColored(Green, "workspaces");
-        ImGui::Separator();
+                                   std::max(40.0f, (ImGui::GetWindowHeight() - Tokens::FooterHeight - size.y) * 0.42f)));
+        BeginCard("WorkspaceOverlay", size, Green, Tokens::SpaceL);
+        const std::string count = std::to_string(vaults.size()) + (vaults.size() == 1 ? " workspace" : " workspaces");
+        CardTitle("workspaces", Green, count.c_str());
 
         if (vaults.empty())
         {
-            ImGui::TextColored(Muted, "no workspaces registered");
+            ImGui::TextColored(TextFaint(), "no workspaces yet");
         }
         else
         {
             const auto* activeVault = registry.ActiveVault();
+            auto* drawList = ImGui::GetWindowDrawList();
             for (std::size_t i = 0; i < vaults.size(); ++i)
             {
                 const bool selected = i == m_navigation.Selected();
                 const bool active = activeVault && vaults[i].id == activeVault->id;
                 const auto& vault = vaults[i];
-                ImGui::TextColored(selected ? Green : Primary, "%s %s %s%s",
-                                   selected ? ">" : " ", vault.emoji.c_str(), vault.title.c_str(),
-                                   active ? " *" : "");
-                ImGui::SameLine();
-                ImGui::TextColored(Muted, "%s", vault.path.string().c_str());
+                ImGui::PushID(static_cast<int>(i));
+                ImVec2 rowMin;
+                ImVec2 rowMax;
+                const bool clicked = ListRow("##vault", selected, rowHeight, Green, &rowMin, &rowMax);
+                ImGui::PopID();
+
+                // Emoji tile, title, path underneath, and a pill for the open workspace
+                const float tile = lineHeight * 1.7f;
+                const ImVec2 tileMin(rowMin.x + 12.0f, rowMin.y + (rowHeight - tile) * 0.5f);
+                drawList->AddRectFilled(tileMin, ImVec2(tileMin.x + tile, tileMin.y + tile), U32(Mix(Surface(3), Green, selected ? 0.18f : 0.06f)),
+                                        Tokens::RadiusM);
+                const float emojiWidth = ImGui::CalcTextSize(vault.emoji.c_str()).x;
+                drawList->AddText(ImVec2(tileMin.x + (tile - emojiWidth) * 0.5f, tileMin.y + (tile - lineHeight) * 0.5f), U32(Primary),
+                                  vault.emoji.c_str());
+                const float textX = tileMin.x + tile + 12.0f;
+                drawList->AddText(ImVec2(textX, rowMin.y + 6.0f), U32(selected ? Green : Primary), vault.title.c_str());
+                drawList->PushClipRect(rowMin, ImVec2(rowMax.x - 90.0f, rowMax.y), true);
+                drawList->AddText(ImVec2(textX, rowMin.y + 8.0f + lineHeight), U32(TextFaint()), vault.path.generic_string().c_str());
+                drawList->PopClipRect();
+                if (active)
+                {
+                    DrawPill(drawList, ImVec2(rowMax.x - PillWidth("open") - 12.0f, rowMin.y + 8.0f), "open", Green);
+                }
+                if (clicked)
+                {
+                    const auto clickedVault = vault;
+                    EndCard();
+                    Close();
+                    if (callbacks.openVault)
+                    {
+                        callbacks.openVault(clickedVault);
+                    }
+                    return;
+                }
+                ImGui::Dummy(ImVec2(1.0f, 2.0f));
             }
         }
 
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        EndCard();
     }
 }

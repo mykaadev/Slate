@@ -17,8 +17,9 @@ local filter = ""
 
 local function refresh()
   todos = slate.todos.list()
+  local by_title = slate.settings.get("sort_by") == "title"
   table.sort(todos, function(a, b)
-    if priority_rank[a.priority] ~= priority_rank[b.priority] then
+    if not by_title and priority_rank[a.priority] ~= priority_rank[b.priority] then
       return priority_rank[a.priority] < priority_rank[b.priority]
     end
     return a.title:lower() < b.title:lower()
@@ -30,6 +31,7 @@ local function mark_stale() stale = true end
 slate.on("ready", mark_stale)
 slate.on("document_save", mark_stale)
 slate.on("workspace_open", mark_stale)
+slate.on("settings_changed", mark_stale)
 slate.timer.every(3, mark_stale)
 
 local function matches(todo)
@@ -69,7 +71,7 @@ local function draw_column(ui, column, width, height)
     local action = ui.card {
       id = todo.path,
       title = todo.title,
-      body = todo.description,
+      body = slate.settings.get("card_details") and todo.description or nil,
       accent = priority_color[todo.priority] or "muted",
       badge = todo.priority ~= "normal" and todo.priority or nil,
       badge_color = priority_color[todo.priority],
@@ -110,7 +112,7 @@ slate.view.register {
 
     filter = ui.input("kanban-filter", filter, "filter cards")
     ui.space(2)
-    if #todos > 0 then
+    if #todos > 0 and slate.settings.get("show_progress") then
       ui.progress(done / #todos, "green")
       ui.muted(string.format("%d of %d done", done, #todos))
     end
@@ -118,12 +120,16 @@ slate.view.register {
 
     if ui.key("n") then new_card("open") end
 
+    local shown = {}
+    for _, column in ipairs(columns) do
+      if column.state ~= "done" or slate.settings.get("show_done") then shown[#shown + 1] = column end
+    end
     local gap = 12
-    local column_width = math.floor((ui.width() - gap * (#columns - 1)) / #columns)
+    local column_width = math.floor((ui.width() - gap * (#shown - 1)) / #shown)
     local column_height = ui.height() - 4
-    for index, column in ipairs(columns) do
+    for index, column in ipairs(shown) do
       draw_column(ui, column, column_width, column_height)
-      if index < #columns then ui.same_line(gap) end
+      if index < #shown then ui.same_line(gap) end
     end
   end,
 }

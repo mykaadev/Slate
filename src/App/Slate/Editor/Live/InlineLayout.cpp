@@ -525,7 +525,7 @@ namespace Software::Slate::Live
                     DrawStyledText(drawList, fontSize, position, StyleColor(style, alpha), begin, stop, IsBold(style),
                                    IsItalic(style));
                 }
-                if (IsLinkStyle(style))
+                if (IsLinkStyle(style) && options.linkUnderline)
                 {
                     const float underlineY = top + fontSize * 1.04f;
                     drawList->AddLine(ImVec2(position.x, underlineY),

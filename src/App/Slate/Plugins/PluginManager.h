@@ -33,6 +33,36 @@ namespace Software::Slate
         Failed
     };
 
+    // Kind of value a plugin setting holds
+    enum class PluginSettingType
+    {
+        Bool,
+        Number,
+        Choice,
+        Text
+    };
+
+    // One user-facing setting declared in plugin.json; the settings screen renders it
+    struct PluginSettingSpec
+    {
+        // Stores the key passed to slate.settings.get
+        std::string key;
+        // Stores the visible label
+        std::string label;
+        // Stores a one line hint
+        std::string description;
+        // Stores the value kind
+        PluginSettingType type = PluginSettingType::Bool;
+        // Stores the default in stored form: b:true, n:220, s:monday
+        std::string defaultValue;
+        // Stores the choices for Choice settings
+        std::vector<std::string> options;
+        // Stores the range and step for Number settings
+        double min = 0.0;
+        double max = 100.0;
+        double step = 1.0;
+    };
+
     // Metadata read from plugin.json
     struct PluginManifest
     {
@@ -50,6 +80,8 @@ namespace Software::Slate
         std::string main = "main.lua";
         // Stores the Slate plugin API version the plugin targets
         int apiVersion = 1;
+        // Stores the settings the plugin exposes on the settings screen
+        std::vector<PluginSettingSpec> settings;
     };
 
     // Read-only snapshot of one plugin for settings screens and commands
@@ -102,6 +134,20 @@ namespace Software::Slate
         void ReloadAll();
         // Creates a starter plugin in the user plugin folder
         bool CreatePlugin(const std::string& name, fs::path* createdDirectory, std::string* error = nullptr);
+
+        // Returns a plugin setting in stored form (b:, n:, s:), falling back to the manifest default
+        std::string SettingValue(const std::string& id, const std::string& key);
+        // Stores a plugin setting, saves it, and sends settings_changed to the plugin
+        bool SetSetting(const std::string& id, const std::string& key, const std::string& stored, std::string* error = nullptr);
+        // Clears every stored setting of a plugin back to its defaults
+        bool ResetSettings(const std::string& id, std::string* error = nullptr);
+        // Formats stored values for display and parses them back
+        static std::string StoredBool(bool value);
+        static std::string StoredNumber(double value);
+        static std::string StoredText(const std::string& value);
+        static bool StoredAsBool(const std::string& stored);
+        static double StoredAsNumber(const std::string& stored);
+        static std::string StoredAsText(const std::string& stored);
 
         // Returns the bundled plugin folder next to the executable
         static fs::path BundledPluginDirectory();

@@ -34,6 +34,7 @@ local function scan()
         for target in lower:gmatch("%]%(([^%)]+)%)") do
           if target:find(name .. ".md", 1, true) then found = true end
         end
+        if not found and slate.settings.get("mentions") and lower:find(name, 1, true) then found = true end
         if found then hits[#hits + 1] = { line = line_number, text = trim(line) } end
       end
       if #hits > 0 then cache.items[#cache.items + 1] = { path = file, hits = hits } end
@@ -44,6 +45,7 @@ end
 slate.on("ready", scan)
 slate.on("document_open", scan)
 slate.on("document_save", scan)
+slate.on("settings_changed", scan)
 
 slate.view.register {
   id = "backlinks",
@@ -58,8 +60,9 @@ slate.view.register {
     for _, item in ipairs(cache.items) do
       if ui.link(stem(item.path)) then slate.document.open(item.path) end
       ui.tooltip(item.path)
+      local snippets = slate.settings.get("snippets")
       for index, hit in ipairs(item.hits) do
-        if index > 2 then break end
+        if index > snippets then break end
         ui.markdown(hit.text)
       end
       ui.space(6)

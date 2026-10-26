@@ -7,10 +7,16 @@
 #include "App/Slate/Core/SlateModeIds.h"
 #include "App/Slate/Extensions/SlateExtensionRegistry.h"
 #include "App/Slate/Extensions/SlateShellBridge.h"
+#include "App/Slate/Core/AppPaths.h"
+#include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Plugins/PluginManager.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
+#include "Platform/PlatformWindowService.h"
 
+#include "Core/Runtime/AppConfig.h"
 #include "Core/Runtime/CommandRegistry.h"
 #include "Core/Runtime/ToolRegistry.h"
 #include "imgui.h"
@@ -18,7 +24,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstring>
+#include <ctime>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -29,6 +37,35 @@ namespace Software::Modes::Slate
 
     namespace
     {
+        // The boot sequence plays once per launch, whichever mode draws first
+        struct BootState
+        {
+            bool done = false;
+            double start = -1.0;
+        };
+        BootState g_boot;
+        constexpr double BootSeconds = 2.1;
+        constexpr double BootFadeSeconds = 0.4;
+
+        const Software::Slate::EditorSettings& AppSettings(const Software::Core::Runtime::AppContext& context)
+        {
+            static const Software::Slate::EditorSettings defaults = Software::Slate::EditorSettingsService::DefaultSettings();
+            const auto workspace = context.services.Resolve<Software::Slate::SlateWorkspaceContext>();
+            return workspace && workspace->HasWorkspaceLoaded() ? workspace->CurrentEditorSettings() : defaults;
+        }
+
+        bool AnyInputThisFrame()
+        {
+            for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key)
+            {
+                if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false))
+                {
+                    return true;
+                }
+            }
+            return ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        }
+
         struct CommandMatch
         {
             Software::Core::Runtime::CommandDefinition definition;
@@ -154,8 +191,36 @@ namespace Software::Modes::Slate
             SetError(backgroundError);
         }
 
-        HandleGlobalKeys(context);
-        const bool overlayOpen =
+        const auto& appSettings = AppSettings(context);
+        bool booting = false;
+        if (!g_boot.done)
+        {
+            if (!appSettings.bootSequence)
+            {
+                g_boot.done = true;
+            }
+            else
+            {
+                if (g_boot.start < 0.0)
+                {
+                    g_boot.start = m_nowSeconds;
+                }
+                const double age = m_nowSeconds - g_boot.start;
+                // Any key skips straight to the fade
+                if (age > 0.15 && age < BootSeconds - BootFadeSeconds && AnyInputThisFrame())
+                {
+                    g_boot.start = m_nowSeconds - (BootSeconds - BootFadeSeconds);
+                }
+                booting = m_nowSeconds - g_boot.start < BootSeconds;
+                g_boot.done = !booting;
+            }
+        }
+
+        if (!booting)
+        {
+            HandleGlobalKeys(context);
+        }
+        const bool overlayOpen = booting ||
             m_helpOpen || m_prompt.open || m_confirm.open || SearchOpen() ||
             (WorkspaceSwitcherOverlay(context) && WorkspaceSwitcherOverlay(context)->IsOpen()) ||
             (TodoOverlay(context) && TodoOverlay(context)->IsAnyOpen());
@@ -167,6 +232,7 @@ namespace Software::Modes::Slate
         DrawRootBegin(context);
 
         const bool handleInput = !overlayOpen;
+        const bool modalOpen = overlayOpen && !booting;
         if (m_helpOpen)
         {
             DrawHelp(context);
@@ -174,6 +240,21 @@ namespace Software::Modes::Slate
         else
         {
             DrawMode(context, handleInput);
+        }
+
+        // Overlays sit on a soft backdrop; a child window keeps it above the screen's own panels
+        if (modalOpen && !m_helpOpen)
+        {
+            const ImVec2 cursor = ImGui::GetCursorPos();
+            ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
+            ImGui::BeginChild("##OverlayBackdrop", ImGui::GetWindowSize(), ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+            const ImVec2 min = ImGui::GetWindowPos();
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                min, ImVec2(min.x + ImGui::GetWindowWidth(), min.y + ImGui::GetWindowHeight()),
+                ImGui::ColorConvertFloat4ToU32(ImVec4(Background.x, Background.y, Background.z, 0.62f)));
+            ImGui::EndChild();
+            ImGui::SetCursorPos(cursor);
         }
 
         if (SearchOpen())
@@ -198,6 +279,11 @@ namespace Software::Modes::Slate
         }
 
         DrawStatusLine(context);
+        if (booting)
+        {
+            DrawBootSequence(context, m_nowSeconds - g_boot.start);
+        }
+        DrawScanlines(appSettings.scanlines);
         ImGui::End();
         ImGui::PopStyleVar(4);
         ImGui::PopStyleColor(12);
@@ -212,28 +298,73 @@ namespace Software::Modes::Slate
     void SlateModeBase::DrawHelp(Software::Core::Runtime::AppContext& context) const
     {
         const auto& shortcuts = WorkspaceContext(context).Shortcuts();
-        ImGui::TextColored(Cyan, "shortcuts");
-        ImGui::Separator();
-        TextLine((shortcuts.Label(Software::Slate::ShortcutAction::NavigateUp) + "/" +
-                  shortcuts.Label(Software::Slate::ShortcutAction::NavigateDown)).c_str(), "move");
-        TextLine((shortcuts.Label(Software::Slate::ShortcutAction::NavigateLeft) + "/" +
-                  shortcuts.Label(Software::Slate::ShortcutAction::NavigateRight)).c_str(), "tree nav");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Accept).c_str(), "open/accept");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Cancel).c_str(), "back/cancel");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserFilter).c_str(), "search/filter");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::CommandPalette).c_str(), "command");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::EditorSave).c_str(), "save");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeJournal).c_str(), "journal");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeNewNote).c_str(), "new");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeFiles).c_str(), "files");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeTodos).c_str(), "todos");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeSettings).c_str(), "config");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserNewFolder).c_str(), "folder");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::HomeWorkspaces).c_str(), "workspaces");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserMove).c_str(), "move path");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::BrowserDelete).c_str(), "delete");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::ToggleHelp).c_str(), "help");
-        TextLine(shortcuts.Label(Software::Slate::ShortcutAction::Quit).c_str(), "quit");
+        using Action = Software::Slate::ShortcutAction;
+        struct Entry
+        {
+            std::string key;
+            const char* label;
+        };
+        const auto key = [&shortcuts](Action action) { return shortcuts.Label(action); };
+        const std::vector<std::pair<const char*, std::vector<Entry>>> groups{
+            {"move around",
+             {{key(Action::NavigateUp) + "/" + key(Action::NavigateDown), "move"},
+              {key(Action::NavigateLeft) + "/" + key(Action::NavigateRight), "tree"},
+              {key(Action::Accept), "open"},
+              {key(Action::Cancel), "back"},
+              {key(Action::BrowserFilter), "search"},
+              {key(Action::CommandPalette), "commands"},
+              {"ctrl+shift+p", "commands"},
+              {"alt+left/right", "history"}}},
+            {"notes",
+             {{key(Action::HomeJournal), "journal"},
+              {key(Action::HomeNewNote), "new note"},
+              {key(Action::HomeFiles), "files"},
+              {key(Action::HomeTodos), "todos"},
+              {key(Action::HomeWorkspaces), "workspaces"},
+              {key(Action::BrowserNewFolder), "new folder"},
+              {key(Action::BrowserMove), "move"},
+              {key(Action::BrowserDelete), "delete"}}},
+            {"writing",
+             {{key(Action::EditorSave), "save"},
+              {key(Action::EditorPreview), "reading view"},
+              {key(Action::EditorOutline), "outline"},
+              {key(Action::EditorSidebar), "sidebar"},
+              {key(Action::EditorFind), "find"},
+              {"ctrl+b/i/e", "bold, italic, code"},
+              {"ctrl+k", "link"},
+              {"alt+up/down", "move lines"},
+              {"/", "insert blocks"}}},
+            {"slate",
+             {{key(Action::HomeSettings), "config"},
+              {key(Action::ToggleHelp), "this help"},
+              {key(Action::Quit), "quit"},
+              {"plugins", ":plugins"},
+              {"init.lua", ":init"}}},
+        };
+
+        const float width = std::min(1080.0f, ImGui::GetWindowWidth() - 120.0f);
+        const float height = std::min(520.0f, ImGui::GetWindowHeight() - Tokens::FooterHeight - 80.0f);
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - width) * 0.5f,
+                                   std::max(40.0f, (ImGui::GetWindowHeight() - Tokens::FooterHeight - height) * 0.45f)));
+        BeginCard("HelpCard", ImVec2(width, height), Cyan, Tokens::SpaceXL);
+        CardTitle("keyboard", Cyan, "every key is rebindable in config");
+        if (ImGui::BeginTable("HelpColumns", static_cast<int>(groups.size()), ImGuiTableFlags_SizingStretchSame))
+        {
+            ImGui::TableNextRow();
+            for (const auto& [title, entries] : groups)
+            {
+                ImGui::TableNextColumn();
+                SectionLabel(title, Amber);
+                ImGui::Dummy(ImVec2(1.0f, 4.0f));
+                for (const auto& entry : entries)
+                {
+                    KeyHint(entry.key, entry.label, Amber);
+                    ImGui::Dummy(ImVec2(1.0f, 2.0f));
+                }
+            }
+            ImGui::EndTable();
+        }
+        EndCard();
     }
 
     void SlateModeBase::DrawFooterControls(Software::Core::Runtime::AppContext& context)
@@ -774,7 +905,8 @@ namespace Software::Modes::Slate
         handlers.showTodos = [this, &context]() {
             ShowTodos(context);
         };
-        handlers.showSettings = [this, &context]() {
+        handlers.showSettings = [this, &context](const std::string& section) {
+            UiState(context).settingsSection = section;
             ShowSettings(context);
         };
         handlers.showFiles = [this, &context]() {
@@ -795,6 +927,12 @@ namespace Software::Modes::Slate
         };
         handlers.openWorkspace = [this, &context](const std::string& root) {
             return OpenWorkspace(root, context);
+        };
+        handlers.showHelp = [this]() {
+            m_helpOpen = true;
+        };
+        handlers.showPalette = [this]() {
+            BeginCommandPrompt();
         };
 
         const auto result = Software::Slate::DispatchSlateCommand(Software::Slate::PathUtils::Trim(command), context, handlers);
@@ -875,23 +1013,32 @@ namespace Software::Modes::Slate
         const int scrollbarStyle = workspace.HasWorkspaceLoaded()
                                        ? workspace.CurrentEditorSettings().scrollbarStyle
                                        : 1;
+        ApplyImGuiTheme();
+        const auto& appSettings = AppSettings(context);
+        ImGui::GetStyle().FontScaleMain = static_cast<float>(appSettings.interfaceScale) / 100.0f;
+        SetCursorBlink(appSettings.cursorBlink);
+        if (const auto window = context.services.Resolve<Software::Platform::PlatformWindowService>())
+        {
+            window->RequestFontFamily(appSettings.fontFamily);
+        }
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->Pos);
         ImGui::SetNextWindowSize(viewport->Size);
         ImGui::SetNextWindowViewport(viewport->ID);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, Background);
         ImGui::PushStyleColor(ImGuiCol_Text, Primary);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Panel);
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(Muted.x, Muted.y, Muted.z, 0.34f));
-        ImGui::PushStyleColor(ImGuiCol_SeparatorHovered, ImVec4(Amber.x, Amber.y, Amber.z, 0.42f));
-        ImGui::PushStyleColor(ImGuiCol_SeparatorActive, ImVec4(Green.x, Green.y, Green.z, 0.50f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, Surface(3));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Mix(Surface(3), Cyan, 0.08f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Mix(Surface(3), Muted, 0.1f));
+        ImGui::PushStyleColor(ImGuiCol_Separator, Border());
+        ImGui::PushStyleColor(ImGuiCol_SeparatorHovered, Alpha(Amber, 0.42f));
+        ImGui::PushStyleColor(ImGuiCol_SeparatorActive, Alpha(Green, 0.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28.0f, 24.0f));
         PushSlateScrollbarStyle(scrollbarStyle);
         ImGui::Begin("SlateRoot", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking);
+        SyncWindowChrome(context);
     }
 
     void SlateModeBase::DrawSearchOverlay(Software::Core::Runtime::AppContext& context)
@@ -965,21 +1112,16 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::DrawPromptOverlay(Software::Core::Runtime::AppContext& context)
     {
-        const ImVec2 size(std::min(620.0f, std::max(340.0f, ImGui::GetWindowWidth() * 0.54f)), 104.0f);
-        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, ImGui::GetWindowHeight() - size.y - 46.0f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
+        const ImVec2 size(std::min(640.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.5f)), 96.0f);
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, ImGui::GetWindowHeight() - size.y - Tokens::FooterHeight - 18.0f));
         const ImVec2 promptPos = ImGui::GetCursorPos();
         if (m_prompt.commandMode)
         {
             DrawCommandSuggestions(context, promptPos, size.x);
             ImGui::SetCursorPos(promptPos);
         }
-        ImGui::BeginChild("PromptOverlay", size, true);
-        ImGui::TextColored(Cyan, "%s", m_prompt.title.c_str());
+        BeginCard("PromptOverlay", size, Cyan, Tokens::SpaceL);
+        CardTitle(m_prompt.title.c_str(), Cyan, m_prompt.commandMode ? "tab completes" : nullptr);
         ImGui::SetNextItemWidth(-1.0f);
         if (m_prompt.focus)
         {
@@ -1003,10 +1145,10 @@ namespace Software::Modes::Slate
             {
                 m_prompt.buffer.reserve(m_prompt.buffer.size() + 256);
             }
-            submitted = ImGui::InputText("##prompt", m_prompt.buffer.data(), m_prompt.buffer.capacity() + 1,
-                                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackResize |
-                                             ImGuiInputTextFlags_CallbackCompletion | ImGuiInputTextFlags_CallbackHistory,
-                                         CommandPromptCallback, &payload);
+            submitted = ImGui::InputTextWithHint("##prompt", "type a command", m_prompt.buffer.data(), m_prompt.buffer.capacity() + 1,
+                                                 ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackResize |
+                                                     ImGuiInputTextFlags_CallbackCompletion | ImGuiInputTextFlags_CallbackHistory,
+                                                 CommandPromptCallback, &payload);
             m_prompt.buffer.resize(std::strlen(m_prompt.buffer.c_str()));
             if (payload.historyDelta != 0 && !matches.empty())
             {
@@ -1041,9 +1183,7 @@ namespace Software::Modes::Slate
                 callback(value, context);
             }
         }
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        EndCard();
 
         if (WorkspaceContext(context).Shortcuts().Pressed(Software::Slate::ShortcutAction::Cancel))
         {
@@ -1053,19 +1193,6 @@ namespace Software::Modes::Slate
 
     void SlateModeBase::DrawConfirmOverlay(Software::Core::Runtime::AppContext& context)
     {
-        const ImVec2 size(std::min(520.0f, std::max(320.0f, ImGui::GetWindowWidth() * 0.46f)), 128.0f);
-        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
-                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 14.0f));
-        ImGui::BeginChild("ConfirmOverlay", size, true);
-        ImGui::Dummy(ImVec2(1.0f, 18.0f));
-        TextCentered(m_confirm.message.c_str(), m_confirm.destructive ? Red : Amber);
-        ImGui::Dummy(ImVec2(1.0f, 12.0f));
-
         const auto& shortcuts = WorkspaceContext(context).Shortcuts();
         std::string actions = shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmAccept, m_confirm.acceptLabel);
         if (!m_confirm.declineLabel.empty())
@@ -1073,10 +1200,20 @@ namespace Software::Modes::Slate
             actions += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::ConfirmDecline, m_confirm.declineLabel);
         }
         actions += "   " + shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, m_confirm.cancelLabel);
-        DrawShortcutTextCentered(actions);
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+
+        const ImVec4 accent = m_confirm.destructive ? Red : Amber;
+        const float width = std::clamp(std::max(ShortcutTextWidth(actions), ImGui::CalcTextSize(m_confirm.message.c_str()).x) + 80.0f,
+                                       340.0f, 560.0f);
+        const ImVec2 size(width, 132.0f);
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f, (ImGui::GetWindowHeight() - size.y) * 0.42f));
+        BeginCard("ConfirmOverlay", size, accent, Tokens::SpaceXL);
+        CardTitle(m_confirm.destructive ? "careful" : "confirm", accent);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(Primary, "%s", m_confirm.message.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Dummy(ImVec2(1.0f, 8.0f));
+        DrawShortcutText(actions, accent);
+        EndCard();
 
         if (shortcuts.Pressed(Software::Slate::ShortcutAction::ConfirmAccept) ||
             shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
@@ -1107,31 +1244,135 @@ namespace Software::Modes::Slate
     {
         DrawFooterControls(context);
 
-        const float helperY = ImGui::GetWindowHeight() - 52.0f;
-        ImGui::SetCursorPosY(helperY);
-        ImGui::Separator();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const float windowWidth = ImGui::GetWindowWidth();
+        const float windowHeight = ImGui::GetWindowHeight();
+        const float padding = ImGui::GetStyle().WindowPadding.x;
+        auto* drawList = ImGui::GetWindowDrawList();
+
+        // Key hints for whatever has focus
+        ImGui::SetCursorPos(ImVec2(padding, windowHeight - Tokens::FooterHeight + 4.0f));
         DrawShortcutText(HelperText(context));
-        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 26.0f);
+
+        // Status bar: logo, mode, workspace, message ... plugin items, clock
+        const ImVec2 barMin(windowPos.x, windowPos.y + windowHeight - Tokens::StatusBarHeight);
+        const ImVec2 barMax(windowPos.x + windowWidth, windowPos.y + windowHeight);
+        drawList->AddRectFilled(barMin, barMax, U32(Surface(1)));
+        drawList->AddLine(barMin, ImVec2(barMax.x, barMin.y), U32(Border(0.9f)), 1.0f);
+        const float textY = barMin.y + (Tokens::StatusBarHeight - ImGui::GetTextLineHeight()) * 0.5f;
+        const float barTop = barMin.y + 1.0f;
+        const float barHeight = Tokens::StatusBarHeight - 1.0f;
+        float x = barMin.x;
+
+        const std::string badge = StatusBadge(context);
+        ImVec4 badgeColor = Cyan;
+        if (badge == "NOTE" || badge == "EDIT")
+        {
+            badgeColor = Green;
+        }
+        else if (badge == "READ")
+        {
+            badgeColor = MarkdownLink;
+        }
+        else if (badge == "FILES")
+        {
+            badgeColor = Amber;
+        }
+        else if (badge == "CONFIG")
+        {
+            badgeColor = Mix(Muted, Primary, 0.4f);
+        }
+        else if (badge != "HOME" && badge != "SETUP")
+        {
+            badgeColor = MarkdownImage;
+        }
+        // Powerline segments: mode, then workspace, then the open note as plain text
+        const float arrow = barHeight * 0.42f;
+        const std::string modeText = "    " + badge;
+        const float modeStart = x;
+        auto drawMode = [&]() {
+            PowerlineSegment(drawList, modeStart, barTop, barHeight, modeText, badgeColor, Background);
+            DrawLogoMark(drawList, ImVec2(modeStart + 17.0f, barTop + barHeight * 0.5f), 14.0f);
+        };
+        x = modeStart + PowerlineWidth(modeText, barHeight);
+
+        const auto& workspace = WorkspaceContext(context);
+        if (!workspace.HasWorkspaceLoaded())
+        {
+            drawMode();
+            x += 8.0f;
+        }
+        else
+        {
+            std::string name = workspace.Workspace().Root().filename().u8string();
+            if (const auto* vault = workspace.WorkspaceRegistry().ActiveVault())
+            {
+                name = vault->emoji + " " + vault->title;
+            }
+            // The workspace segment tucks under the mode arrow
+            x = PowerlineSegment(drawList, x - arrow, barTop, barHeight, "  " + name, Mix(Surface(3), badgeColor, 0.12f), Primary) + 8.0f;
+            drawMode();
+            if (const auto* document = workspace.Documents().Active(); document && badge != "HOME")
+            {
+                const std::string path = document->relativePath.generic_u8string();
+                drawList->AddText(ImVec2(x, textY), U32(TextSecondary()), path.c_str());
+                x += ImGui::CalcTextSize(path.c_str()).x;
+                if (document->dirty)
+                {
+                    drawList->AddCircleFilled(ImVec2(x + 9.0f, textY + ImGui::GetTextLineHeight() * 0.55f), 3.5f, U32(Amber), 12);
+                    x += 14.0f;
+                }
+            }
+        }
+
         ImVec4 statusColor = m_statusIsError ? Red : Muted;
         if (!m_statusIsError)
         {
             const float age = static_cast<float>(std::max(0.0, m_nowSeconds - m_statusSeconds));
-            statusColor.w = std::clamp(1.0f - age / 4.0f, 0.22f, 1.0f);
+            statusColor.w = std::clamp(1.0f - age / 5.0f, 0.0f, 1.0f);
         }
-        ImGui::TextColored(statusColor, "%s", m_status.c_str());
 
-        // Plugin status items sit on the right, separated like a terminal status bar
-        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
-            registry && !registry->StatusItems().empty())
+        // Right side: plugin items, then the clock segment at the edge
+        std::string clockText;
+        if (AppSettings(context).statusClock)
         {
-            std::string right;
+            char clock[16] = {};
+            const std::time_t now = std::time(nullptr);
+            std::tm local{};
+#if defined(_WIN32)
+            localtime_s(&local, &now);
+#else
+            localtime_r(&now, &local);
+#endif
+            std::strftime(clock, sizeof(clock), "%H:%M", &local);
+            clockText = clock;
+        }
+        std::string items;
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
+        {
             for (const auto& item : registry->StatusItems())
             {
-                right += (right.empty() ? "" : "  \xc2\xb7  ") + item.text;
+                items += (items.empty() ? "" : "  \xc2\xb7  ") + item.text;
             }
-            const float width = ImGui::CalcTextSize(right.c_str()).x;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - width));
-            ImGui::TextColored(Muted, "%s", right.c_str());
+        }
+        const float clockStart = clockText.empty() ? barMax.x : barMax.x - PowerlineWidth(clockText, barHeight);
+        float rightX = clockStart;
+        if (!items.empty())
+        {
+            rightX = PowerlineSegment(drawList, clockText.empty() ? barMax.x : clockStart + arrow, barTop, barHeight, items, Surface(3),
+                                      TextSecondary(), false);
+        }
+        if (!clockText.empty())
+        {
+            PowerlineSegment(drawList, barMax.x, barTop, barHeight, clockText, Mix(Surface(3), Cyan, 0.22f), Primary, false);
+        }
+
+        if (statusColor.w > 0.01f && !m_status.empty())
+        {
+            const float messageX = x + 18.0f;
+            drawList->PushClipRect(ImVec2(messageX, barMin.y), ImVec2(rightX - 18.0f, barMax.y), true);
+            drawList->AddText(ImVec2(messageX, textY), U32(statusColor), m_status.c_str());
+            drawList->PopClipRect();
         }
     }
 
@@ -1151,10 +1392,10 @@ namespace Software::Modes::Slate
 
         const int count = static_cast<int>(matches.size());
         m_prompt.selected = std::clamp(m_prompt.selected, 0, count - 1);
-        const int visible = std::min(count, 8);
+        const int visible = std::min(count, 9);
         const int first = std::clamp(m_prompt.selected - visible + 1, 0, count - visible);
-        const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
-        const float height = rowHeight * static_cast<float>(visible) + 22.0f;
+        const float rowHeight = ImGui::GetTextLineHeight() + 10.0f;
+        const float height = rowHeight * static_cast<float>(visible) + Tokens::SpaceM * 2.0f;
 
         // Key chords bound through plugins are shown next to their commands
         std::vector<std::pair<std::string, std::string>> chords;
@@ -1166,46 +1407,48 @@ namespace Software::Modes::Slate
             }
         }
 
-        ImGui::SetCursorPos(ImVec2(promptPos.x, promptPos.y - height - 6.0f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Muted.x, Muted.y, Muted.z, 0.22f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 10.0f));
-        ImGui::BeginChild("CommandSuggestions", ImVec2(width, height), true, ImGuiWindowFlags_NoScrollbar);
+        ImGui::SetCursorPos(ImVec2(promptPos.x, promptPos.y - height - 8.0f));
+        BeginCard("CommandSuggestions", ImVec2(width, height), Muted, Tokens::SpaceM);
         float tokenWidth = 0.0f;
         for (int index = first; index < first + visible; ++index)
         {
             tokenWidth = std::max(tokenWidth, ImGui::CalcTextSize(CommandToken(matches[static_cast<std::size_t>(index)].definition).c_str()).x);
         }
-        tokenWidth += ImGui::CalcTextSize("> ").x + 14.0f + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+        tokenWidth += 34.0f;
+        auto* drawList = ImGui::GetWindowDrawList();
         for (int index = first; index < first + visible; ++index)
         {
             const auto& command = matches[static_cast<std::size_t>(index)].definition;
             const bool selected = index == m_prompt.selected;
-            const float rowY = ImGui::GetCursorPosY();
-            ImGui::TextColored(selected ? Green : Muted, "%s", selected ? ">" : " ");
-            ImGui::SameLine();
-            ImGui::TextColored(selected ? Green : Amber, "%s", CommandToken(command).c_str());
-            ImGui::SameLine(tokenWidth);
-            ImGui::TextColored(selected ? Primary : ImVec4(Primary.x, Primary.y, Primary.z, 0.78f), "%s", command.label.c_str());
+            ImGui::PushID(index);
+            ImVec2 rowMin;
+            ImVec2 rowMax;
+            if (ListRow("##command", selected, rowHeight, Green, &rowMin, &rowMax))
+            {
+                m_prompt.selected = index;
+                m_prompt.buffer = CommandToken(command);
+            }
+            ImGui::PopID();
+            const float textY = rowMin.y + 5.0f;
+            drawList->AddText(ImVec2(rowMin.x + 12.0f, textY), U32(selected ? Green : Amber), CommandToken(command).c_str());
+            drawList->AddText(ImVec2(rowMin.x + tokenWidth, textY), U32(selected ? Primary : Alpha(Primary, 0.75f)), command.label.c_str());
 
-            std::string hint = command.category;
+            bool hasChord = false;
             for (const auto& [chordCommand, chord] : chords)
             {
                 if (chordCommand == command.id || chordCommand == CommandToken(command))
                 {
-                    hint = chord;
+                    DrawKeycap(drawList, ImVec2(rowMax.x - KeycapWidth(chord) - 10.0f, rowMin.y + (rowHeight - KeycapHeight()) * 0.5f), chord, Amber);
+                    hasChord = true;
                 }
             }
-            const float hintWidth = ImGui::CalcTextSize(hint.c_str()).x;
-            ImGui::SameLine(std::max(tokenWidth + 160.0f, ImGui::GetWindowWidth() - 14.0f - hintWidth));
-            ImGui::SetCursorPosY(rowY);
-            ImGui::TextColored(Muted, "%s", hint.c_str());
+            if (!hasChord)
+            {
+                const float hintWidth = ImGui::CalcTextSize(command.category.c_str()).x;
+                drawList->AddText(ImVec2(rowMax.x - hintWidth - 10.0f, textY), U32(TextFaint()), command.category.c_str());
+            }
         }
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        EndCard();
     }
 
     void SlateModeBase::ProcessShellRequests(Software::Core::Runtime::AppContext& context)
@@ -1411,6 +1654,128 @@ namespace Software::Modes::Slate
             EditorContext(context).SetTextFocused(true);
         }
     }
+
+    std::string SlateModeBase::StatusBadge(const Software::Core::Runtime::AppContext&) const
+    {
+        const std::string_view mode = ModeName();
+        if (mode == Software::Slate::ModeIds::Home) return "HOME";
+        if (mode == Software::Slate::ModeIds::Editor) return "NOTE";
+        if (mode == Software::Slate::ModeIds::Browser) return "FILES";
+        if (mode == Software::Slate::ModeIds::Settings) return "CONFIG";
+        if (mode == Software::Slate::ModeIds::Workspace) return "SETUP";
+        return "VIEW";
+    }
+
+    void SlateModeBase::DrawBootSequence(Software::Core::Runtime::AppContext& context, double age)
+    {
+        const float fade = static_cast<float>(std::clamp((BootSeconds - age) / BootFadeSeconds, 0.0, 1.0));
+        const ImVec2 cursor = ImGui::GetCursorPos();
+        ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
+        ImGui::BeginChild("##Boot", ImGui::GetWindowSize(), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+        auto* drawList = ImGui::GetWindowDrawList();
+        const ImVec2 min = ImGui::GetWindowPos();
+        const ImVec2 size = ImGui::GetWindowSize();
+        drawList->AddRectFilled(min, ImVec2(min.x + size.x, min.y + size.y), U32(Alpha(Background, fade)));
+
+        // Boot log lines, each with a status tag, revealed one after another
+        const auto& workspace = WorkspaceContext(context);
+        std::vector<std::pair<std::string, std::string>> lines;
+        lines.emplace_back("config", FriendlyPath(Software::Slate::AppPaths::ConfigDirectory().generic_u8string()));
+        if (workspace.HasWorkspaceLoaded())
+        {
+            std::string name = workspace.Workspace().Root().filename().u8string();
+            if (const auto* vault = workspace.WorkspaceRegistry().ActiveVault())
+            {
+                name = vault->emoji + " " + vault->title;
+            }
+            lines.emplace_back("workspace", name);
+            lines.emplace_back("index", std::to_string(workspace.Workspace().MarkdownFiles().size()) + " notes");
+        }
+        else
+        {
+            lines.emplace_back("workspace", "none yet");
+        }
+        if (const auto plugins = context.services.Resolve<Software::Slate::PluginManager>())
+        {
+            int loaded = 0;
+            for (const auto& plugin : plugins->Plugins())
+            {
+                loaded += plugin.status == Software::Slate::PluginStatus::Loaded ? 1 : 0;
+            }
+            lines.emplace_back("plugins", std::to_string(loaded) + " loaded");
+        }
+        lines.emplace_back("keys", std::to_string(workspace.Shortcuts().Definitions().size()) + " bindings");
+
+        const float cell = std::clamp(size.x / 70.0f, 8.0f, 14.0f);
+        const ImVec2 logoSize = BlockLogoSize(cell);
+        const float lineHeight = ImGui::GetTextLineHeightWithSpacing() + 2.0f;
+        const float blockHeight = logoSize.y + 36.0f + lineHeight * static_cast<float>(lines.size() + 2);
+        const float top = min.y + std::max(24.0f, (size.y - blockHeight) * 0.42f);
+        const ImVec2 logoPos(min.x + (size.x - logoSize.x) * 0.5f, top);
+
+        // The logo types itself in from left to right
+        const float reveal = static_cast<float>(std::clamp(age / 0.45, 0.0, 1.0));
+        drawList->PushClipRect(logoPos, ImVec2(logoPos.x + logoSize.x * reveal + 1.0f, logoPos.y + logoSize.y), true);
+        DrawBlockLogo(drawList, logoPos, cell, m_nowSeconds, fade);
+        drawList->PopClipRect();
+
+        const float columnWidth = std::min(size.x - 48.0f, 460.0f);
+        const float left = min.x + (size.x - columnWidth) * 0.5f;
+        float y = top + logoSize.y + 28.0f;
+        const std::string version = std::string("slate ") + SOFTWARE_APP_VERSION + "  \xc2\xb7  plain-text notes, todos and journal";
+        drawList->AddText(ImVec2(left, y), U32(Alpha(TextSecondary(), fade)), version.c_str());
+        y += lineHeight + 6.0f;
+
+        const float tagWidth = ImGui::CalcTextSize("[ ok ] ").x;
+        const float labelWidth = ImGui::CalcTextSize("workspace  ").x;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+        {
+            const double shownAt = 0.4 + 0.16 * static_cast<double>(i);
+            if (age < shownAt)
+            {
+                break;
+            }
+            drawList->AddText(ImVec2(left, y), U32(Alpha(TextFaint(), fade)), "[    ]");
+            drawList->AddText(ImVec2(left + ImGui::CalcTextSize("[ ").x, y), U32(Alpha(Green, fade)), "ok");
+            drawList->AddText(ImVec2(left + tagWidth, y), U32(Alpha(Primary, fade)), lines[i].first.c_str());
+            const std::string detail = Ellipsize(lines[i].second, columnWidth - tagWidth - labelWidth);
+            drawList->AddText(ImVec2(left + tagWidth + labelWidth, y), U32(Alpha(TextSecondary(), fade)), detail.c_str());
+            y += lineHeight;
+        }
+        if (age >= 0.4 + 0.16 * static_cast<double>(lines.size()))
+        {
+            y += 6.0f;
+            drawList->AddText(ImVec2(left, y), U32(Alpha(Cyan, fade)), "ready");
+            if (CursorVisible(m_nowSeconds))
+            {
+                const float x = left + ImGui::CalcTextSize("ready ").x;
+                drawList->AddRectFilled(ImVec2(x, y + 2.0f), ImVec2(x + ImGui::CalcTextSize("_").x, y + ImGui::GetTextLineHeight()),
+                                        U32(Alpha(Amber, fade)));
+            }
+        }
+        if (fade > 0.6f)
+        {
+            const char* skip = "any key skips";
+            drawList->AddText(ImVec2(min.x + (size.x - ImGui::CalcTextSize(skip).x) * 0.5f, min.y + size.y - 40.0f),
+                              U32(Alpha(TextFaint(), fade * 0.8f)), skip);
+        }
+        ImGui::EndChild();
+        ImGui::SetCursorPos(cursor);
+    }
+
+    void SlateModeBase::SyncWindowChrome(Software::Core::Runtime::AppContext& context)
+    {
+        // The native title bar follows the palette so the window reads as one surface
+        const ImVec4 caption = Background;
+        if (caption.x == m_chromeColor.x && caption.y == m_chromeColor.y && caption.z == m_chromeColor.z)
+        {
+            return;
+        }
+        m_chromeColor = caption;
+        if (const auto window = context.services.Resolve<Software::Platform::PlatformWindowService>())
+        {
+            window->SetChromeColors(caption.x, caption.y, caption.z, Primary.x, Primary.y, Primary.z);
+        }
+    }
 }
-
-

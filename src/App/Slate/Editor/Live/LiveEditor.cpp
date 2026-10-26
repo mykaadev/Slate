@@ -773,6 +773,7 @@ namespace Software::Slate::Live
         inlineBase.fontSize = fontSize;
         inlineBase.lineGap = gap;
         inlineBase.headingScale = settings.headingScale;
+        inlineBase.linkUnderline = settings.linkUnderline;
 
         float y = fontSize * 0.6f;
         for (std::size_t b = 0; b < m_blocks.size(); ++b)
@@ -1524,7 +1525,7 @@ namespace Software::Slate::Live
             return;
         }
         const double sinceInput = now - m_lastInputTime;
-        const bool on = sinceInput < 0.6 || std::fmod(sinceInput, 1.1) < 0.65;
+        const bool on = !settings.caretBlink || sinceInput < 0.6 || std::fmod(sinceInput, 1.1) < 0.65;
         if (on)
         {
             drawList->AddRectFilled(ImVec2(top.x - 1.0f, top.y + 1.0f), ImVec2(top.x + 1.0f, top.y + row.textHeight + 1.0f),
@@ -2123,6 +2124,7 @@ namespace Software::Slate::Live
         {
             ImGui::SetScrollY(0.0f);
             m_resetScroll = false;
+            m_scrollTarget = -1.0f;
         }
         const ImVec2 available = ImGui::GetContentRegionAvail();
         const float gutter = settings.fontSize * 1.2f;
@@ -2166,20 +2168,50 @@ namespace Software::Slate::Live
                 const float caretTop = visual.y + row.y;
                 const float caretBottom = caretTop + row.height;
                 const float margin = m_lineHeight * 2.0f;
+                const float currentTop = m_scrollTarget >= 0.0f ? m_scrollTarget : m_scrollY;
                 if (m_centerCaret)
                 {
-                    ImGui::SetScrollY(std::max(0.0f, caretTop - m_viewHeight * 0.35f));
+                    m_scrollTarget = std::max(0.0f, caretTop - m_viewHeight * 0.35f);
                 }
-                else if (caretTop < m_scrollY + margin)
+                else if (caretTop < currentTop + margin)
                 {
-                    ImGui::SetScrollY(std::max(0.0f, caretTop - margin));
+                    m_scrollTarget = std::max(0.0f, caretTop - margin);
                 }
-                else if (caretBottom > m_scrollY + m_viewHeight - margin)
+                else if (caretBottom > currentTop + m_viewHeight - margin)
                 {
-                    ImGui::SetScrollY(caretBottom - m_viewHeight + margin);
+                    m_scrollTarget = caretBottom - m_viewHeight + margin;
                 }
             }
             m_centerCaret = false;
+        }
+
+        // Caret-follow scrolling eases toward its target; the wheel takes over at once
+        if (m_scrollTarget >= 0.0f)
+        {
+            if (ImGui::GetIO().MouseWheel != 0.0f && ImGui::IsWindowHovered())
+            {
+                m_scrollTarget = -1.0f;
+            }
+            else if (settings.scrollMotion <= 0)
+            {
+                ImGui::SetScrollY(m_scrollTarget);
+                m_scrollTarget = -1.0f;
+            }
+            else
+            {
+                const float speed = settings.scrollMotion == 1 ? 18.0f : 9.0f;
+                const float t = 1.0f - std::exp(-ImGui::GetIO().DeltaTime * speed);
+                const float next = m_scrollY + (m_scrollTarget - m_scrollY) * t;
+                if (std::fabs(m_scrollTarget - next) < 0.5f)
+                {
+                    ImGui::SetScrollY(m_scrollTarget);
+                    m_scrollTarget = -1.0f;
+                }
+                else
+                {
+                    ImGui::SetScrollY(next);
+                }
+            }
         }
 
         ImDrawList* drawList = ImGui::GetWindowDrawList();

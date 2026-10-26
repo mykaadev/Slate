@@ -167,9 +167,11 @@ namespace Software::Slate
     std::string LinkService::MarkdownTargetFor(const fs::path& sourceRelativePath, const fs::path& newRelativePath,
                                                const std::string& anchor)
     {
-        std::error_code ec;
-        fs::path relative = fs::relative(newRelativePath, sourceRelativePath.parent_path(), ec);
-        if (ec)
+        // Both paths are workspace relative, so the link is computed lexically; fs::relative would
+        // resolve them against the process working directory instead of the workspace
+        const fs::path base = sourceRelativePath.parent_path().empty() ? fs::path(".") : sourceRelativePath.parent_path();
+        fs::path relative = PathUtils::NormalizeRelative(newRelativePath).lexically_relative(PathUtils::NormalizeRelative(base));
+        if (relative.empty())
         {
             relative = newRelativePath;
         }

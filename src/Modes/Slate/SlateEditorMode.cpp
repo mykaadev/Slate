@@ -137,6 +137,16 @@ namespace Software::Modes::Slate
                ui.editorView == Software::Slate::SlateEditorView::Document;
     }
 
+    std::string SlateEditorMode::StatusBadge(const Software::Core::Runtime::AppContext& context) const
+    {
+        auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
+        if (UiState(mutableContext).editorView == Software::Slate::SlateEditorView::Preview)
+        {
+            return "READ";
+        }
+        return EditorContext(mutableContext).IsTextFocused() ? "EDIT" : "NOTE";
+    }
+
     void SlateEditorMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
     {
         auto& workspace = WorkspaceContext(context);
@@ -557,12 +567,23 @@ namespace Software::Modes::Slate
                 ImGui::PushID(view->id.c_str());
                 ImGui::TextColored(Muted, "%s", view->title.c_str());
                 ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::CalcTextSize("x").x - 2.0f);
-                ImGui::PushStyleColor(ImGuiCol_Text, WithAlpha(Muted, 0.6f));
-                if (ImGui::SmallButton("x"))
+                const ImVec2 closePos = ImGui::GetCursorScreenPos();
+                const ImVec2 closeSize = ImGui::CalcTextSize("x");
+                if (ImGui::InvisibleButton("##close", closeSize))
                 {
                     ui.closedSidebarViews.insert(view->id);
                 }
-                ImGui::PopStyleColor();
+                ImGui::GetWindowDrawList()->AddText(closePos,
+                                                    ImGui::ColorConvertFloat4ToU32(ImGui::IsItemHovered() ? Red : WithAlpha(Muted, 0.55f)),
+                                                    "x");
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip("hide panel (:panel %s to bring it back)", view->id.c_str());
+                }
+                const ImVec2 rule = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddLine(ImVec2(rule.x, rule.y + 2.0f), ImVec2(rule.x + ImGui::GetContentRegionAvail().x, rule.y + 2.0f),
+                                                    ImGui::ColorConvertFloat4ToU32(WithAlpha(Muted, 0.15f)), 1.0f);
+                ImGui::Dummy(ImVec2(1.0f, 6.0f));
                 const auto draw = view->draw;
                 if (draw)
                 {
@@ -603,6 +624,9 @@ namespace Software::Modes::Slate
         settings.captureNavigation = paletteOpen;
         settings.acceptInput = handleInput;
         settings.pageWidth = static_cast<float>(editorSettings.pageWidth);
+        settings.caretBlink = editorSettings.cursorBlink;
+        settings.linkUnderline = editorSettings.linkUnderline;
+        settings.scrollMotion = editorSettings.scrollMotion;
 
         Software::Slate::Live::LiveEditorHooks hooks;
         hooks.openLink = [this](const std::string& target, bool isWikiLink) {

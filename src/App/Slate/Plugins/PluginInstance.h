@@ -63,5 +63,11 @@ namespace Software::Slate
         void InstallViews(PluginInstance& plugin);
         // Returns steady-clock seconds used for call budgets
         double SteadySeconds();
+        // Reads the plugin's stored settings from disk once
+        void EnsureSettingsLoaded(PluginInstance& plugin);
+        // Writes the plugin's stored settings to disk
+        void SaveSettings(const PluginInstance& plugin);
+        // Pushes a stored setting value as its Lua type
+        void PushStoredValue(lua_State* L, const std::string& stored);
     }
 }

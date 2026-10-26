@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <cstdlib>
 #include <sstream>
 #include <utility>
 
@@ -54,6 +55,67 @@ namespace Software::Slate
                 slug.pop_back();
             }
             return slug;
+        }
+
+        // Reads one entry of the plugin.json settings array; unknown types are skipped
+        bool ReadSettingSpec(const nlohmann::json& entry, PluginSettingSpec* spec)
+        {
+            if (!entry.is_object() || !entry.contains("key") || !entry["key"].is_string())
+            {
+                return false;
+            }
+            spec->key = entry["key"].get<std::string>();
+            spec->label = entry.value("label", spec->key);
+            spec->description = entry.value("description", std::string());
+            const std::string type = entry.value("type", std::string("bool"));
+            const auto defaultValue = entry.find("default");
+            if (type == "bool" || type == "boolean")
+            {
+                spec->type = PluginSettingType::Bool;
+                spec->defaultValue = PluginManager::StoredBool(defaultValue != entry.end() && defaultValue->is_boolean() &&
+                                                               defaultValue->get<bool>());
+            }
+            else if (type == "number")
+            {
+                spec->type = PluginSettingType::Number;
+                spec->min = entry.value("min", 0.0);
+                spec->max = entry.value("max", 100.0);
+                spec->step = std::max(0.0001, entry.value("step", 1.0));
+                const double value = defaultValue != entry.end() && defaultValue->is_number() ? defaultValue->get<double>() : spec->min;
+                spec->defaultValue = PluginManager::StoredNumber(value);
+            }
+            else if (type == "choice")
+            {
+                spec->type = PluginSettingType::Choice;
+                if (const auto options = entry.find("options"); options != entry.end() && options->is_array())
+                {
+                    for (const auto& option : *options)
+                    {
+                        if (option.is_string())
+                        {
+                            spec->options.push_back(option.get<std::string>());
+                        }
+                    }
+                }
+                if (spec->options.empty())
+                {
+                    return false;
+                }
+                const std::string value =
+                    defaultValue != entry.end() && defaultValue->is_string() ? defaultValue->get<std::string>() : spec->options.front();
+                spec->defaultValue = PluginManager::StoredText(value);
+            }
+            else if (type == "text" || type == "string")
+            {
+                spec->type = PluginSettingType::Text;
+                spec->defaultValue = PluginManager::StoredText(
+                    defaultValue != entry.end() && defaultValue->is_string() ? defaultValue->get<std::string>() : std::string());
+            }
+            else
+            {
+                return false;
+            }
+            return true;
         }
 
         bool ReadManifest(const fs::path& directory, PluginManifest* manifest)
@@ -95,6 +157,17 @@ namespace Software::Slate
             if (const auto it = json.find("api"); it != json.end() && it->is_number_integer())
             {
                 manifest->apiVersion = it->get<int>();
+            }
+            if (const auto it = json.find("settings"); it != json.end() && it->is_array())
+            {
+                for (const auto& entry : *it)
+                {
+                    PluginSettingSpec spec;
+                    if (ReadSettingSpec(entry, &spec))
+                    {
+                        manifest->settings.push_back(std::move(spec));
+                    }
+                }
             }
 
             manifest->id = Slugify(manifest->id);
@@ -355,6 +428,135 @@ end)
         }
         ReloadAll();
         return true;
+    }
+
+    std::string PluginManager::SettingValue(const std::string& id, const std::string& key)
+    {
+        for (const auto& plugin : m_plugins)
+        {
+            if (plugin->info.manifest.id != id)
+            {
+                continue;
+            }
+            PluginLuaApi::EnsureSettingsLoaded(*plugin);
+            if (const auto it = plugin->settings.find(key); it != plugin->settings.end())
+            {
+                return it->second;
+            }
+            for (const auto& spec : plugin->info.manifest.settings)
+            {
+                if (spec.key == key)
+                {
+                    return spec.defaultValue;
+                }
+            }
+        }
+        return {};
+    }
+
+    bool PluginManager::SetSetting(const std::string& id, const std::string& key, const std::string& stored, std::string* error)
+    {
+        for (const auto& plugin : m_plugins)
+        {
+            if (plugin->info.manifest.id != id)
+            {
+                continue;
+            }
+            PluginLuaApi::EnsureSettingsLoaded(*plugin);
+            plugin->settings[key] = stored;
+            PluginLuaApi::SaveSettings(*plugin);
+            PluginInstance* target = plugin.get();
+            Emit("settings_changed", [target, &key, &stored](PluginInstance& listener) {
+                if (&listener != target)
+                {
+                    return -1;
+                }
+                lua_pushlstring(listener.L, key.data(), key.size());
+                PluginLuaApi::PushStoredValue(listener.L, stored);
+                return 2;
+            });
+            return true;
+        }
+        if (error)
+        {
+            *error = "unknown plugin: " + id;
+        }
+        return false;
+    }
+
+    bool PluginManager::ResetSettings(const std::string& id, std::string* error)
+    {
+        for (const auto& plugin : m_plugins)
+        {
+            if (plugin->info.manifest.id != id)
+            {
+                continue;
+            }
+            PluginLuaApi::EnsureSettingsLoaded(*plugin);
+            std::vector<std::string> keys;
+            for (const auto& spec : plugin->info.manifest.settings)
+            {
+                keys.push_back(spec.key);
+            }
+            for (const auto& key : keys)
+            {
+                plugin->settings.erase(key);
+            }
+            PluginLuaApi::SaveSettings(*plugin);
+            for (const auto& spec : plugin->info.manifest.settings)
+            {
+                PluginInstance* target = plugin.get();
+                Emit("settings_changed", [target, &spec](PluginInstance& listener) {
+                    if (&listener != target)
+                    {
+                        return -1;
+                    }
+                    lua_pushlstring(listener.L, spec.key.data(), spec.key.size());
+                    PluginLuaApi::PushStoredValue(listener.L, spec.defaultValue);
+                    return 2;
+                });
+            }
+            return true;
+        }
+        if (error)
+        {
+            *error = "unknown plugin: " + id;
+        }
+        return false;
+    }
+
+    std::string PluginManager::StoredBool(bool value)
+    {
+        return value ? "b:true" : "b:false";
+    }
+
+    std::string PluginManager::StoredNumber(double value)
+    {
+        std::ostringstream text;
+        text.precision(12);
+        text << value;
+        return "n:" + text.str();
+    }
+
+    std::string PluginManager::StoredText(const std::string& value)
+    {
+        return "s:" + value;
+    }
+
+    bool PluginManager::StoredAsBool(const std::string& stored)
+    {
+        return stored == "b:true" || stored == "true";
+    }
+
+    double PluginManager::StoredAsNumber(const std::string& stored)
+    {
+        const std::string body = stored.size() >= 2 && stored[1] == ':' ? stored.substr(2) : stored;
+        return std::strtod(body.c_str(), nullptr);
+    }
+
+    std::string PluginManager::StoredAsText(const std::string& stored)
+    {
+        return stored.size() >= 2 && stored[1] == ':' ? stored.substr(2) : stored;
     }
 
     fs::path PluginManager::BundledPluginDirectory()

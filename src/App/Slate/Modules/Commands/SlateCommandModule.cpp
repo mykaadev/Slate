@@ -45,10 +45,12 @@ namespace Software::Slate::Modules
         commands.Register(MakeCommand("slate.folder.new", "New Folder", "Workspace", "Create a folder in the workspace.", {"folder", "mkdir"}));
         commands.Register(MakeCommand("slate.workspace.switcher", "Switch Workspace", "Workspace", "Show the workspace/vault switcher.", {"workspaces", "workspace switcher", "vaults"}));
         commands.Register(MakeCommand("slate.todos.show", "Show Todos", "Todos", "Open the todo overlay.", {"todo", "todos"}));
-        commands.Register(MakeCommand("slate.settings.show", "Show Settings", "Settings", "Open app settings.", {"c", "config", "theme", "settings"}));
+        commands.Register(MakeCommand("slate.settings.show", "Show Settings", "Settings", "Open app settings, optionally at a section or a plugin's page.", {"c", "config", "theme", "settings"}, true));
         commands.Register(MakeCommand("slate.browser.files", "Show Files", "Workspace", "Show the workspace file tree.", {"files", "f", "tree", "library", "l"}));
         commands.Register(MakeCommand("slate.search.show", "Search Workspace", "Search", "Open workspace search.", {"search", "s", "docs"}, true));
         commands.Register(MakeCommand("slate.workspace.setup", "New Workspace", "Workspace", "Open workspace setup.", {"new workspace", "new vault"}));
         commands.Register(MakeCommand("slate.workspace.open", "Open Workspace", "Workspace", "Open a workspace by path.", {"workspace"}, true));
+        commands.Register(MakeCommand("slate.help.show", "Keyboard Help", "App", "Show every keyboard shortcut.", {"help", "keys"}));
+        commands.Register(MakeCommand("slate.palette.show", "Command Palette", "App", "Open the command palette.", {"palette", "commands"}));
     }
 }

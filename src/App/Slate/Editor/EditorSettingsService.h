@@ -33,6 +33,18 @@ namespace Software::Slate
         bool headingScale = true;
         // Editor font family; must be installed on the system
         std::string fontFamily = "Cascadia Mono";
+        // Scales every font in the app, in percent
+        int interfaceScale = 100;
+        // What opens on launch: 0 home, 1 last note, 2 today's journal
+        int startScreen = 0;
+        // Plays the short boot sequence on launch
+        bool bootSequence = true;
+        // Shows the clock in the status bar
+        bool statusClock = true;
+        // Blinks the text caret and the wordmark cursor
+        bool cursorBlink = true;
+        // Draws faint CRT scanlines over the app: 0 off, 1 subtle, 2 strong
+        int scanlines = 0;
     };
 
     class EditorSettingsService

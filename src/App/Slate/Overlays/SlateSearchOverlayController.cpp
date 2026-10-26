@@ -1,6 +1,7 @@
 #include "App/Slate/Overlays/SlateSearchOverlayController.h"
 
 #include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateDesign.h"
 #include "App/Slate/UI/SlateUi.h"
 #include "App/Slate/Workspace/SearchService.h"
 
@@ -252,10 +253,12 @@ namespace Software::Slate
         if (shortcuts.Pressed(ShortcutAction::NavigateDown, true))
         {
             m_navigation.MoveNext();
+            m_navigationChanged = true;
         }
         if (shortcuts.Pressed(ShortcutAction::NavigateUp, true))
         {
             m_navigation.MovePrevious();
+            m_navigationChanged = true;
         }
         if ((shortcuts.Pressed(ShortcutAction::Accept) || shortcuts.Pressed(ShortcutAction::SearchPrevious)) &&
             m_navigation.HasSelection() && !m_results.empty())
@@ -273,23 +276,38 @@ namespace Software::Slate
             return;
         }
 
-        const ImVec2 size(std::min(760.0f, std::max(360.0f, ImGui::GetWindowWidth() * 0.58f)),
-                          std::min(520.0f, std::max(280.0f, ImGui::GetWindowHeight() * 0.52f)));
-        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
-                                   (ImGui::GetWindowHeight() - size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Panel);
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.28f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 7.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
-        ImGui::BeginChild("SearchOverlay", size, true);
-
         const bool documentFind = m_scope == SearchOverlayScope::Document;
-        ImGui::TextColored(Cyan, "%s", documentFind ? "find in file" : "search");
+        const ImVec2 size(std::min(780.0f, std::max(380.0f, ImGui::GetWindowWidth() * 0.56f)),
+                          std::min(540.0f, std::max(300.0f, ImGui::GetWindowHeight() * 0.56f)));
+        ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() - size.x) * 0.5f,
+                                   std::max(40.0f, (ImGui::GetWindowHeight() - Tokens::FooterHeight - size.y) * 0.42f)));
+        BeginCard("SearchOverlay", size, Cyan, Tokens::SpaceL);
+
+        // Title row with the search modes as pills; the active mode is solid
+        CardTitle(documentFind ? "find in note" : "search", Cyan,
+                  m_results.empty() ? nullptr : (std::to_string(m_results.size()) + " results").c_str());
+        ImGui::TextColored(TextFaint(), "%s", documentFind ? "this note" : "workspace");
         if (!documentFind)
         {
-            ImGui::SameLine();
-            ImGui::TextColored(WorkspaceSearchModeColor(m_mode), "%s", WorkspaceSearchModeLabel(m_mode));
+            float pillX = ImGui::GetWindowContentRegionMax().x;
+            std::vector<SearchMode> modes{m_mode};
+            for (SearchMode next = NextWorkspaceSearchMode(m_mode); next != m_mode && modes.size() < 6;
+                 next = NextWorkspaceSearchMode(next))
+            {
+                modes.push_back(next);
+            }
+            std::sort(modes.begin(), modes.end(), [](SearchMode a, SearchMode b) { return static_cast<int>(a) < static_cast<int>(b); });
+            for (auto it = modes.rbegin(); it != modes.rend(); ++it)
+            {
+                pillX -= PillWidth(WorkspaceSearchModeLabel(*it)) + 6.0f;
+            }
+            ImGui::SameLine(pillX);
+            for (const SearchMode mode : modes)
+            {
+                Pill(WorkspaceSearchModeLabel(mode), WorkspaceSearchModeColor(mode), mode == m_mode);
+                ImGui::SameLine(0.0f, 6.0f);
+            }
+            ImGui::NewLine();
         }
 
         ImGui::SetNextItemWidth(-1.0f);
@@ -299,46 +317,81 @@ namespace Software::Slate
             m_focusInput = false;
         }
         InputTextString("##SearchQuery", m_query, 0);
-        ImGui::Separator();
+        ImGui::Dummy(ImVec2(1.0f, 6.0f));
 
         const bool showQueryHint = m_query.empty() && (documentFind || m_mode != SearchMode::Recent);
         if (showQueryHint)
         {
-            const std::string hint = documentFind ? std::string("type to find in this file")
+            const std::string hint = documentFind ? std::string("type to find in this note")
                                                     : WorkspaceSearchModeHint(m_mode, shortcuts);
-            ImGui::TextColored(Muted, "%s", hint.c_str());
+            ImGui::Dummy(ImVec2(1.0f, 10.0f));
+            ImGui::TextColored(TextFaint(), "%s", hint.c_str());
         }
         else if (m_results.empty())
         {
-            ImGui::TextColored(Muted, "no matches");
+            ImGui::Dummy(ImVec2(1.0f, 10.0f));
+            ImGui::TextColored(TextFaint(), "nothing matches \"%s\"", m_query.c_str());
         }
         else
         {
+            ImGui::BeginChild("SearchResults", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            auto* drawList = ImGui::GetWindowDrawList();
+            const float lineHeight = ImGui::GetTextLineHeight();
             for (std::size_t i = 0; i < m_results.size(); ++i)
             {
                 const auto& result = m_results[i];
                 const bool selected = i == m_navigation.Selected();
+                const bool twoLines = !result.snippet.empty();
+                const float rowHeight = twoLines ? lineHeight * 2.0f + 12.0f : lineHeight + 10.0f;
+                ImGui::PushID(static_cast<int>(i));
+                ImVec2 rowMin;
+                ImVec2 rowMax;
+                const bool clicked = ListRow("##result", selected, rowHeight, Green, &rowMin, &rowMax);
+                ImGui::PopID();
+                if (selected && m_navigationChanged)
+                {
+                    ImGui::SetScrollHereY(0.5f);
+                }
+
+                std::string title;
+                std::string detail;
                 if (documentFind)
                 {
-                    ImGui::TextColored(selected ? Green : Primary, "%s line %zu:%zu", selected ? ">" : " ",
-                                       result.line, result.column);
+                    title = "line " + std::to_string(result.line);
+                    detail = ":" + std::to_string(result.column);
                 }
                 else
                 {
-                    std::string label = result.relativePath.generic_string();
+                    title = result.relativePath.stem().generic_string();
+                    detail = result.relativePath.parent_path().generic_string();
                     if (m_mode == SearchMode::FullText)
                     {
-                        label += ":" + std::to_string(result.line);
+                        detail += (detail.empty() ? "" : "  ") + std::string("line ") + std::to_string(result.line);
                     }
-                    ImGui::TextColored(selected ? Green : Primary, "%s %s", selected ? ">" : " ", label.c_str());
                 }
-                ImGui::SameLine();
-                ImGui::TextColored(Muted, "%s", result.snippet.c_str());
+                const float textX = rowMin.x + 14.0f;
+                drawList->AddText(ImVec2(textX, rowMin.y + 5.0f), U32(selected ? Green : Primary), title.c_str());
+                drawList->AddText(ImVec2(textX + ImGui::CalcTextSize(title.c_str()).x + 10.0f, rowMin.y + 5.0f), U32(TextFaint()),
+                                  detail.c_str());
+                if (twoLines)
+                {
+                    drawList->PushClipRect(rowMin, ImVec2(rowMax.x - 8.0f, rowMax.y), true);
+                    drawList->AddText(ImVec2(textX, rowMin.y + 7.0f + lineHeight), U32(TextSecondary()), result.snippet.c_str());
+                    drawList->PopClipRect();
+                }
+                if (clicked)
+                {
+                    m_navigation.SetSelected(i);
+                    ImGui::EndChild();
+                    EndCard();
+                    ActivateSelected(callbacks);
+                    return;
+                }
             }
+            m_navigationChanged = false;
+            ImGui::EndChild();
         }
 
-        ImGui::EndChild();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor(2);
+        EndCard();
     }
 }
