@@ -1,23 +1,21 @@
 #include "Modes/Slate/SlateEditorMode.h"
 
 #include "App/Slate/Core/PathUtils.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/Editor/EditorSettingsService.h"
+#include "App/Slate/Editor/SlateEditorContext.h"
 #include "App/Slate/Extensions/SlateExtensionRegistry.h"
+#include "App/Slate/State/SlateUiState.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
+#include "App/Slate/UI/SlateUi.h"
+
+#include "imgui.h"
 
 #if defined(_WIN32)
 #define NOMINMAX
 #include <Windows.h>
 #include <shellapi.h>
 #endif
-
-#include "App/Slate/Editor/EditorSettingsService.h"
-#include "App/Slate/Core/PathUtils.h"
-#include "App/Slate/Editor/SlateEditorContext.h"
-#include "App/Slate/Core/SlateModeIds.h"
-#include "App/Slate/State/SlateUiState.h"
-#include "App/Slate/State/SlateWorkspaceContext.h"
-#include "App/Slate/UI/SlateUi.h"
-
-#include "imgui.h"
 
 #include <algorithm>
 #include <array>
@@ -52,17 +50,6 @@ namespace Software::Modes::Slate
             ImGui::SetCursorPosX(x);
         }
 
-        struct EditorColumnLayout
-        {
-            float pageWidth = 0.0f;
-            float pageOffset = 0.0f;
-            float outlineWidth = 0.0f;
-            float previewWidth = 0.0f;
-            float outlineGap = 0.0f;
-            float previewGap = 0.0f;
-            float gap = 18.0f;
-        };
-
         float ApproachValue(float current, float target, double deltaSeconds, float response = 12.0f)
         {
             const float dt = std::clamp(static_cast<float>(deltaSeconds), 0.0f, 0.12f);
@@ -75,66 +62,6 @@ namespace Software::Modes::Slate
         {
             const float t = std::clamp(value, 0.0f, 1.0f);
             return t * t * (3.0f - 2.0f * t);
-        }
-
-        EditorColumnLayout BuildEditorColumnLayout(float availableWidth,
-                                                   float configuredWidth,
-                                                   float outlineProgress,
-                                                   float previewProgress,
-                                                   int panelLayout)
-        {
-            EditorColumnLayout layout;
-            const float width = std::max(1.0f, availableWidth);
-            const float desiredPageWidth = std::min(width, configuredWidth > 0.0f ? configuredWidth : width);
-            const float outlineT = SmoothProgress(outlineProgress);
-            const float previewT = SmoothProgress(previewProgress);
-            const bool hasOutline = outlineT > 0.001f;
-            const bool hasPreview = previewT > 0.001f;
-            const float outlineTargetWidth = hasOutline ? std::min(300.0f, std::max(200.0f, width * 0.22f)) : 0.0f;
-            const float desiredOutlineWidth = outlineTargetWidth * outlineT;
-
-            if (panelLayout == 1 && (hasOutline || hasPreview))
-            {
-                layout.outlineWidth = desiredOutlineWidth;
-                layout.outlineGap = hasOutline ? layout.gap * outlineT : 0.0f;
-                const float maxOutlineWidth = width > 520.0f ? width * 0.34f : width * 0.28f;
-                layout.outlineWidth = std::min(layout.outlineWidth, std::max(0.0f, maxOutlineWidth));
-                layout.previewGap = hasPreview ? layout.gap * previewT : 0.0f;
-
-                const float laneStart = layout.outlineWidth + layout.outlineGap;
-                const float laneWidth = std::max(1.0f, width - laneStart);
-                if (hasPreview)
-                {
-                    const float previewTargetWidth = std::min(420.0f, std::max(240.0f, width * 0.32f));
-                    const float previewLimit = std::max(0.0f, laneWidth - layout.previewGap - 1.0f);
-                    layout.previewWidth = std::min(previewTargetWidth * previewT, previewLimit * 0.5f);
-                }
-                layout.pageWidth = std::max(1.0f, laneWidth - layout.previewGap - layout.previewWidth);
-                layout.pageOffset = laneStart;
-                return layout;
-            }
-
-            const float desiredPreviewWidth = hasPreview
-                                                  ? std::min(380.0f, std::max(240.0f, width * 0.28f)) * previewT
-                                                  : 0.0f;
-            layout.outlineGap = hasOutline ? layout.gap * outlineT : 0.0f;
-            layout.previewGap = hasPreview ? layout.gap * previewT : 0.0f;
-            const float requiredMargin = std::max(hasOutline ? desiredOutlineWidth + layout.outlineGap : 0.0f,
-                                                  hasPreview ? desiredPreviewWidth + layout.previewGap : 0.0f);
-            const float maxPageWidth = requiredMargin > 0.0f && width > 520.0f
-                                           ? std::max(320.0f, width - requiredMargin * 2.0f)
-                                           : width;
-
-            layout.pageWidth = std::clamp(std::min(desiredPageWidth, maxPageWidth), 1.0f, width);
-            layout.pageOffset = std::max(0.0f, (width - layout.pageWidth) * 0.5f);
-            layout.outlineWidth = hasOutline
-                                      ? std::min(desiredOutlineWidth, std::max(0.0f, layout.pageOffset - layout.outlineGap))
-                                      : 0.0f;
-            layout.previewWidth = hasPreview
-                                      ? std::min(desiredPreviewWidth,
-                                                 std::max(0.0f, width - layout.pageOffset - layout.pageWidth - layout.previewGap))
-                                      : 0.0f;
-            return layout;
         }
 
         float MotionResponse(int motion)
@@ -152,81 +79,6 @@ namespace Software::Modes::Slate
             }
         }
 
-        float ScrollResponse(int motion)
-        {
-            switch (motion)
-            {
-            case 0:
-                return 0.0f;
-            case 2:
-                return 7.5f;
-            default:
-                return 15.0f;
-            }
-        }
-
-        float EditorFontScale(const Software::Slate::EditorSettings& settings)
-        {
-            const float baseFontSize = ImGui::GetFontSize() > 1.0f ? ImGui::GetFontSize() : 18.0f;
-            return std::clamp(static_cast<float>(settings.fontSize) / std::max(1.0f, baseFontSize), 0.65f, 1.50f);
-        }
-
-        float EditorLineSpacing(const Software::Slate::EditorSettings& settings)
-        {
-            return static_cast<float>(std::max(0, settings.lineSpacing));
-        }
-
-        int CurrentCaretLine(Software::Slate::SlateEditorContext& editor)
-        {
-            if (editor.NativeEditorAvailable())
-            {
-                const auto scrollState = editor.NativeEditorScrollState();
-                if (scrollState.totalLineCount > 0)
-                {
-                    return std::clamp(scrollState.caretLine + 1, 1, std::max(1, scrollState.totalLineCount));
-                }
-            }
-
-            return static_cast<int>(editor.Editor().ActiveLine()) + 1;
-        }
-
-        int PreviewFollowLine(Software::Slate::SlateEditorContext& editor, int followMode)
-        {
-            if (followMode == 0)
-            {
-                return CurrentCaretLine(editor);
-            }
-
-            if (editor.NativeEditorAvailable())
-            {
-                const auto scrollState = editor.NativeEditorScrollState();
-                if (scrollState.totalLineCount > 0)
-                {
-                    const int totalLineCount = std::max(1, scrollState.totalLineCount);
-                    const int firstVisible = std::clamp(scrollState.firstVisibleLine, 0, totalLineCount - 1);
-                    const int visibleCount = std::max(1, scrollState.visibleLineCount);
-                    const int scrollLine = std::clamp(firstVisible + visibleCount / 2, 0, totalLineCount - 1);
-                    const int caretLine = std::clamp(scrollState.caretLine, 0, totalLineCount - 1);
-                    if (followMode == 1)
-                    {
-                        return caretLine + 1;
-                    }
-                    if (followMode == 2)
-                    {
-                        return scrollLine + 1;
-                    }
-
-                    const bool caretVisible = caretLine >= firstVisible && caretLine <= firstVisible + visibleCount;
-                    const int targetLine = caretVisible
-                                               ? static_cast<int>(std::lround(caretLine * 0.72f + scrollLine * 0.28f))
-                                               : scrollLine;
-                    return std::clamp(targetLine + 1, 1, totalLineCount);
-                }
-            }
-
-            return CurrentCaretLine(editor);
-        }
-
         std::size_t CurrentHeadingIndex(const std::vector<Software::Slate::Heading>& headings, int currentLine)
         {
             std::size_t current = headings.size();
@@ -241,202 +93,11 @@ namespace Software::Modes::Slate
             return current;
         }
 
-        std::vector<std::string> SplitTableRow(std::string_view line)
+        int CurrentCaretLine(Software::Slate::SlateEditorContext& editor)
         {
-            std::string text = Software::Slate::PathUtils::Trim(line);
-            if (!text.empty() && text.front() == '|')
-            {
-                text.erase(text.begin());
-            }
-            if (!text.empty() && text.back() == '|')
-            {
-                text.pop_back();
-            }
-
-            std::vector<std::string> cells;
-            std::size_t start = 0;
-            while (start <= text.size())
-            {
-                const std::size_t end = text.find('|', start);
-                const std::string_view cell = end == std::string::npos
-                                                  ? std::string_view(text).substr(start)
-                                                  : std::string_view(text).substr(start, end - start);
-                cells.push_back(Software::Slate::PathUtils::Trim(cell));
-                if (end == std::string::npos)
-                {
-                    break;
-                }
-                start = end + 1;
-            }
-            return cells;
-        }
-
-        bool IsTableSeparator(std::string_view line)
-        {
-            const auto cells = SplitTableRow(line);
-            if (cells.empty())
-            {
-                return false;
-            }
-
-            bool sawRule = false;
-            for (std::string cell : cells)
-            {
-                cell = Software::Slate::PathUtils::Trim(cell);
-                if (!cell.empty() && cell.front() == ':')
-                {
-                    cell.erase(cell.begin());
-                }
-                if (!cell.empty() && cell.back() == ':')
-                {
-                    cell.pop_back();
-                }
-                cell = Software::Slate::PathUtils::Trim(cell);
-                if (cell.size() < 3)
-                {
-                    return false;
-                }
-                for (const char ch : cell)
-                {
-                    if (ch != '-')
-                    {
-                        return false;
-                    }
-                }
-                sawRule = true;
-            }
-            return sawRule;
-        }
-
-        bool IsTableRow(std::string_view line)
-        {
-            return line.find('|') != std::string_view::npos && SplitTableRow(line).size() >= 2;
-        }
-
-        bool ParseMarkdownImage(std::string_view line, std::string* alt, std::string* target)
-        {
-            const std::size_t open = line.find("![");
-            if (open == std::string_view::npos)
-            {
-                return false;
-            }
-
-            const std::size_t closeLabel = line.find(']', open + 2);
-            if (closeLabel == std::string_view::npos || closeLabel + 1 >= line.size() || line[closeLabel + 1] != '(')
-            {
-                return false;
-            }
-
-            const std::size_t closeTarget = line.find(')', closeLabel + 2);
-            if (closeTarget == std::string_view::npos)
-            {
-                return false;
-            }
-
-            if (alt)
-            {
-                *alt = std::string(line.substr(open + 2, closeLabel - open - 2));
-            }
-            if (target)
-            {
-                std::string raw = Software::Slate::PathUtils::Trim(line.substr(closeLabel + 2,
-                                                                               closeTarget - closeLabel - 2));
-                if (!raw.empty() && raw.front() == '<')
-                {
-                    const std::size_t close = raw.find('>');
-                    raw = close == std::string::npos ? raw.substr(1) : raw.substr(1, close - 1);
-                }
-                else
-                {
-                    const auto space = std::find_if(raw.begin(), raw.end(), [](unsigned char ch) {
-                        return std::isspace(ch) != 0;
-                    });
-                    raw.erase(space, raw.end());
-                }
-                *target = raw;
-            }
-            return true;
-        }
-
-        bool IsWebUrl(std::string_view target)
-        {
-            return target.rfind("http://", 0) == 0 || target.rfind("https://", 0) == 0;
-        }
-
-        Software::Slate::fs::path ResolveMarkdownImageTarget(const Software::Slate::WorkspaceService& workspace,
-                                                             const Software::Slate::fs::path& documentRelativePath,
-                                                             std::string_view target)
-        {
-            std::string text = Software::Slate::PathUtils::Trim(target);
-            if (text.empty() || IsWebUrl(text))
-            {
-                return {};
-            }
-
-            std::replace(text.begin(), text.end(), '\\', '/');
-            if (!text.empty() && text.front() == '/')
-            {
-                return (workspace.Root() / text.substr(1)).lexically_normal();
-            }
-
-            Software::Slate::fs::path path(text);
-            if (path.is_absolute())
-            {
-                return path.lexically_normal();
-            }
-
-            return (workspace.Root() / documentRelativePath.parent_path() / path).lexically_normal();
-        }
-
-        std::size_t DrawMarkdownTableBlock(const std::vector<std::string>& lines, std::size_t start, int lineSpacing)
-        {
-            const auto headers = SplitTableRow(lines[start]);
-            const int columnCount = static_cast<int>(headers.size());
-            ImGui::PushID(static_cast<int>(start));
-            ImGui::PushStyleVar(ImGuiStyleVar_CellPadding,
-                                ImVec2(10.0f, 4.0f + static_cast<float>(lineSpacing) * 0.5f));
-            if (ImGui::BeginTable("MarkdownPreviewTable", columnCount,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings))
-            {
-                for (int column = 0; column < columnCount; ++column)
-                {
-                    ImGui::TableSetupColumn(nullptr);
-                }
-
-                ImGui::TableNextRow();
-                for (int column = 0; column < columnCount; ++column)
-                {
-                    ImGui::TableSetColumnIndex(column);
-                    DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(headers[static_cast<std::size_t>(column)]),
-                                    MarkdownTable);
-                }
-
-                std::size_t cursor = start + 2;
-                while (cursor < lines.size() && IsTableRow(lines[cursor]) && !Software::Slate::PathUtils::Trim(lines[cursor]).empty())
-                {
-                    const auto cells = SplitTableRow(lines[cursor]);
-                    ImGui::TableNextRow();
-                    for (int column = 0; column < columnCount; ++column)
-                    {
-                        ImGui::TableSetColumnIndex(column);
-                        if (static_cast<std::size_t>(column) < cells.size())
-                        {
-                            DrawInlineSpans(Software::Slate::MarkdownService::ParseInlineSpans(cells[static_cast<std::size_t>(column)]));
-                        }
-                    }
-                    ++cursor;
-                }
-
-                ImGui::EndTable();
-                ImGui::PopStyleVar();
-                ImGui::PopID();
-                return cursor;
-            }
-
-            ImGui::PopStyleVar();
-            ImGui::PopID();
-            return start + 1;
+            std::size_t line = 1;
+            editor.CaretPosition(&line, nullptr);
+            return static_cast<int>(line);
         }
 
         std::string JournalDateLabel(const Software::Slate::JournalService& journal,
@@ -454,6 +115,12 @@ namespace Software::Modes::Slate
             std::snprintf(buffer, sizeof(buffer), "%d %s %d", day, MonthName(month), year);
             return buffer;
         }
+
+        ImVec4 WithAlpha(ImVec4 color, float alpha)
+        {
+            color.w = alpha;
+            return color;
+        }
     }
 
     const char* SlateEditorMode::ModeName() const
@@ -466,14 +133,8 @@ namespace Software::Modes::Slate
         auto& mutableContext = const_cast<Software::Core::Runtime::AppContext&>(context);
         const auto& ui = UiState(mutableContext);
         const auto& workspace = WorkspaceContext(mutableContext);
-        return EditorContext(mutableContext).NativeEditorAvailable() &&
-               workspace.HasWorkspaceLoaded() &&
-               workspace.Documents().HasOpenDocument() &&
-               ui.editorView == Software::Slate::SlateEditorView::Document &&
-               !HelpOpen() &&
-               !SearchOpen() &&
-               !PromptOpen() &&
-               !ConfirmOpen();
+        return workspace.HasWorkspaceLoaded() && workspace.Documents().HasOpenDocument() &&
+               ui.editorView == Software::Slate::SlateEditorView::Document;
     }
 
     void SlateEditorMode::DrawMode(Software::Core::Runtime::AppContext& context, bool handleInput)
@@ -483,8 +144,6 @@ namespace Software::Modes::Slate
         auto& editor = EditorContext(context);
         auto& ui = UiState(context);
         const auto& editorSettings = workspace.CurrentEditorSettings();
-        editor.SetNativeEditorSettings(editorSettings);
-        SyncNativeChords(context);
         if (!workspace.HasWorkspaceLoaded())
         {
             ShowWorkspaceSetup(context);
@@ -515,87 +174,6 @@ namespace Software::Modes::Slate
             SetError(dropError);
         }
 
-        const auto pasteClipboardImage = [&]() {
-            std::string markdown;
-            std::string error;
-            if (workspace.Assets().CreateMarkdownImageFromClipboard(
-                    document->relativePath,
-                    static_cast<Software::Slate::ImageStoragePolicy>(editorSettings.imageStoragePolicy),
-                    &markdown,
-                    &error))
-            {
-                editor.InsertTextAtCursor(workspace.Documents(),
-                                          markdown + document->lineEnding,
-                                          context.frame.elapsedSeconds);
-                SetStatus("pasted image");
-                return true;
-            }
-
-            SetError(error);
-            return false;
-        };
-
-        const auto activeSlashCommands = [&]() {
-            if (editor.HasSelection())
-            {
-                m_slashCommandQuery.clear();
-                m_slashCommandIndex = 0;
-                editor.HideNativeSlashCommandPalette();
-                return std::vector<Software::Slate::SlashCommandDefinition>{};
-            }
-
-            std::string line;
-            std::size_t caretColumn = 0;
-            std::string query;
-            if (!editor.ActiveLineTextAndCaret(&line, &caretColumn) ||
-                !Software::Slate::SlashCommandService::QueryFromLineAtCaret(line, caretColumn, &query))
-            {
-                m_slashCommandQuery.clear();
-                m_slashCommandIndex = 0;
-                editor.HideNativeSlashCommandPalette();
-                return std::vector<Software::Slate::SlashCommandDefinition>{};
-            }
-
-            auto commands = Software::Slate::SlashCommandService::Filter(query, ExtensionSlashCommands(context));
-            if (query != m_slashCommandQuery)
-            {
-                m_slashCommandQuery = query;
-                m_slashCommandIndex = 0;
-            }
-            if (commands.empty())
-            {
-                m_slashCommandIndex = 0;
-            }
-            else
-            {
-                m_slashCommandIndex = std::clamp(m_slashCommandIndex, 0, static_cast<int>(commands.size()) - 1);
-            }
-            return commands;
-        };
-
-        const auto applySelectedSlashCommand = [&]() {
-            auto commands = activeSlashCommands();
-            if (commands.empty())
-            {
-                return false;
-            }
-            return ApplySlashCommand(context,
-                                     *document,
-                                     commands[static_cast<std::size_t>(m_slashCommandIndex)]);
-        };
-
-        const auto toggleOutlinePanel = [&]() {
-            ui.editorView = Software::Slate::SlateEditorView::Document;
-            ui.outlinePanelOpen = !ui.outlinePanelOpen;
-            ui.navigation.Reset();
-        };
-
-        const auto togglePreviewPanel = [&]() {
-            editor.CommitToActiveDocument(workspace.Documents(), context.frame.elapsedSeconds);
-            ui.editorView = Software::Slate::SlateEditorView::Document;
-            ui.previewPanelOpen = !ui.previewPanelOpen;
-        };
-
         if (handleInput)
         {
             if (ui.editorView == Software::Slate::SlateEditorView::Outline)
@@ -618,177 +196,101 @@ namespace Software::Modes::Slate
                     }
                     ui.editorView = Software::Slate::SlateEditorView::Document;
                 }
-                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline) || shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline) ||
+                    shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
                 {
                     ui.editorView = Software::Slate::SlateEditorView::Document;
                 }
             }
-            else if (ui.editorView == Software::Slate::SlateEditorView::Preview)
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorPreview))
             {
-                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorPreview) || shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
-                {
-                    ui.editorView = Software::Slate::SlateEditorView::Document;
-                }
-                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline))
-                {
-                    ui.navigation.Reset();
-                    ui.editorView = Software::Slate::SlateEditorView::Outline;
-                }
+                // Reading view renders everything and hides the caret
+                ui.editorView = ui.editorView == Software::Slate::SlateEditorView::Preview
+                                    ? Software::Slate::SlateEditorView::Document
+                                    : Software::Slate::SlateEditorView::Preview;
+                editor.SetTextFocused(ui.editorView == Software::Slate::SlateEditorView::Document);
+                SetStatus(ui.editorView == Software::Slate::SlateEditorView::Preview ? "reading view" : "editing");
             }
-            else
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline))
             {
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::SlashNext))
+                ui.outlinePanelOpen = !ui.outlinePanelOpen;
+            }
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorSidebar))
+            {
+                ui.sidebarOpen = !ui.sidebarOpen;
+            }
+            else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorFind))
+            {
+                BeginSearchOverlay(true, context, SearchOverlayScope::Document);
+            }
+            else if (editorSettings.pasteClipboardImages && editor.IsTextFocused() && IsCtrlPressed(ImGuiKey_V) &&
+                     workspace.Assets().HasClipboardImage())
+            {
+                std::string markdown;
+                std::string error;
+                if (workspace.Assets().CreateMarkdownImageFromClipboard(
+                        document->relativePath,
+                        static_cast<Software::Slate::ImageStoragePolicy>(editorSettings.imageStoragePolicy),
+                        &markdown,
+                        &error))
                 {
-                    auto commands = activeSlashCommands();
-                    if (!commands.empty())
-                    {
-                        m_slashCommandIndex = (m_slashCommandIndex + 1) % static_cast<int>(commands.size());
-                    }
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::SlashPrevious))
-                {
-                    auto commands = activeSlashCommands();
-                    if (!commands.empty())
-                    {
-                        m_slashCommandIndex = (m_slashCommandIndex + static_cast<int>(commands.size()) - 1) % static_cast<int>(commands.size());
-                    }
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::SlashCancel))
-                {
-                    std::string line;
-                    std::size_t caretColumn = 0;
-                    std::string query;
-                    if (editor.ActiveLineTextAndCaret(&line, &caretColumn) &&
-                        Software::Slate::SlashCommandService::QueryFromLineAtCaret(line, caretColumn, &query))
-                    {
-                        m_slashCommandSuppressed = true;
-                        m_slashCommandSuppressedQuery = query;
-                        m_slashCommandQuery = query;
-                    }
-                    else
-                    {
-                        m_slashCommandSuppressed = false;
-                        m_slashCommandSuppressedQuery.clear();
-                        m_slashCommandQuery.clear();
-                    }
-                    m_slashCommandIndex = 0;
-                    editor.HideNativeSlashCommandPalette();
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::SlashAccept))
-                {
-                    applySelectedSlashCommand();
-                }
-
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Save))
-                {
-                    SaveActiveDocument(context);
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::OpenLink))
-                {
-                    std::string target;
-                    bool isWikiLink = false;
-                    if (editor.ConsumeNativeOpenLink(&target, &isWikiLink))
-                    {
-                        OpenLinkTarget(context, target, isWikiLink);
-                        return;
-                    }
-                }
-                std::string chordCommand;
-                while (editor.ConsumeNativeChordCommand(&chordCommand))
-                {
-                    if (chordCommand == "__palette")
-                    {
-                        editor.ReleaseNativeEditorFocus();
-                        BeginCommandPrompt();
-                        return;
-                    }
-                    HandleCommand(chordCommand, context);
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Find) &&
-                    workspace.Documents().HasOpenDocument())
-                {
-                    BeginSearchOverlay(true, context, SearchOverlayScope::Document);
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::PasteClipboardImage) &&
-                    workspace.Documents().HasOpenDocument())
-                {
-                    pasteClipboardImage();
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Escape))
-                {
-                    editor.ReleaseNativeEditorFocus();
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Outline))
-                {
-                    toggleOutlinePanel();
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Preview))
-                {
-                    togglePreviewPanel();
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::Todo))
-                {
-                    BeginTodoCreate(context, true);
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::NavigateBack))
-                {
-                    NavigateDocumentHistory(context, -1);
-                }
-                if (editor.ConsumeNativeCommand(Software::Slate::NativeEditorCommand::NavigateForward))
-                {
-                    NavigateDocumentHistory(context, 1);
-                }
-
-                if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorFind) && workspace.Documents().HasOpenDocument())
-                {
-                    BeginSearchOverlay(true, context, SearchOverlayScope::Document);
-                }
-                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorOutline))
-                {
-                    toggleOutlinePanel();
-                }
-                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::EditorPreview))
-                {
-                    togglePreviewPanel();
-                }
-                else if (editorSettings.pasteClipboardImages &&
-                         IsCtrlPressed(ImGuiKey_V) && workspace.Assets().HasClipboardImage() && workspace.Documents().HasOpenDocument())
-                {
-                    pasteClipboardImage();
-                }
-                else if (editor.IsTextFocused())
-                {
-                    if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
-                    {
-                        editor.SetTextFocused(false);
-                    }
+                    editor.InsertTextAtCursor(workspace.Documents(), markdown + "\n", context.frame.elapsedSeconds);
+                    SetStatus("pasted image");
                 }
                 else
                 {
-                    if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
-                    {
-                        BeginSearchOverlay(true, context);
-                    }
-                    else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
-                    {
-                        ShowHome(context);
-                        return;
-                    }
+                    SetError(error);
                 }
+            }
+            else if (!editor.IsTextFocused() && ui.editorView == Software::Slate::SlateEditorView::Document)
+            {
+                if (shortcuts.Pressed(Software::Slate::ShortcutAction::Accept))
+                {
+                    editor.SetTextFocused(true);
+                }
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::BrowserFilter))
+                {
+                    BeginSearchOverlay(true, context);
+                }
+                else if (shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
+                {
+                    ShowHome(context);
+                    return;
+                }
+            }
+            else if (ui.editorView == Software::Slate::SlateEditorView::Preview &&
+                     shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
+            {
+                ui.editorView = Software::Slate::SlateEditorView::Document;
+                editor.SetTextFocused(true);
             }
         }
 
         if (ui.editorView == Software::Slate::SlateEditorView::Outline)
         {
+            DrawHeader(context, *document);
             DrawOutline(context);
+            return;
         }
-        else if (ui.editorView == Software::Slate::SlateEditorView::Preview)
+
+        DrawEditor(context, *document, handleInput);
+
+        // Links and tags clicked inside the editor act once the editor has finished its frame
+        if (!m_pendingLink.empty())
         {
-            DrawMarkdownPreview(context, *document);
+            const std::string link = std::move(m_pendingLink);
+            m_pendingLink.clear();
+            OpenLinkTarget(context, link, m_pendingLinkIsWiki);
         }
-        else
+        if (!m_pendingTag.empty())
         {
-            DrawEditor(context, *document);
+            const std::string tag = std::move(m_pendingTag);
+            m_pendingTag.clear();
+            if (auto* search = SearchOverlay(context))
+            {
+                search->SetQuery(tag);
+            }
+            BeginSearchOverlay(false, context);
         }
     }
 
@@ -808,684 +310,418 @@ namespace Software::Modes::Slate
         {
             return shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "edit") + "   " +
                    shortcuts.Helper(Software::Slate::ShortcutAction::EditorOutline, "outline") + "   " +
-                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "editor");
+                   shortcuts.Helper(Software::Slate::ShortcutAction::EditorFind, "find") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "edit");
         }
-        
-        return shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "preview") + "   " +
+        if (EditorContext(mutableContext).IsTextFocused())
+        {
+            return shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "read") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::EditorOutline, "outline") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::EditorFind, "find") + "   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::EditorSave, "save") + "   (ctrl+shift+p) commands   (/) blocks   " +
+                   shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "done");
+        }
+        return shortcuts.Helper(Software::Slate::ShortcutAction::Accept, "write") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::EditorPreview, "read") + "   " +
                shortcuts.Helper(Software::Slate::ShortcutAction::EditorOutline, "outline") + "   " +
-               shortcuts.Helper(Software::Slate::ShortcutAction::EditorFind, "find") + "   " +
-               shortcuts.Helper(Software::Slate::ShortcutAction::EditorSave, "save") + "   " +
+               shortcuts.Helper(Software::Slate::ShortcutAction::BrowserFilter, "search") + "   " +
                shortcuts.Helper(Software::Slate::ShortcutAction::Cancel, "home");
     }
 
+    void SlateEditorMode::DrawHeader(Software::Core::Runtime::AppContext& context,
+                                     const Software::Slate::DocumentService::Document& document)
+    {
+        auto& ui = UiState(context);
+        auto* drawList = ImGui::GetWindowDrawList();
+
+        // Breadcrumb: folders dim, note name bright
+        const auto parent = document.relativePath.parent_path();
+        bool first = true;
+        for (const auto& part : parent)
+        {
+            if (!first)
+            {
+                ImGui::SameLine(0.0f, 0.0f);
+            }
+            ImGui::TextColored(Muted, "%s", part.u8string().c_str());
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::TextColored(WithAlpha(Muted, 0.5f), " / ");
+            first = false;
+        }
+        if (!first)
+        {
+            ImGui::SameLine(0.0f, 0.0f);
+        }
+        ImGui::TextColored(Primary, "%s", document.relativePath.stem().u8string().c_str());
+
+        // State dot: saved, unsaved, or changed on disk
+        ImGui::SameLine(0.0f, 14.0f);
+        const ImVec4 stateColor = document.conflict ? Red : (document.dirty ? Amber : Green);
+        const char* stateLabel = document.conflict ? "changed on disk" : (document.dirty ? "unsaved" : "saved");
+        const ImVec2 dot = ImGui::GetCursorScreenPos();
+        drawList->AddCircleFilled(ImVec2(dot.x + 4.0f, dot.y + ImGui::GetTextLineHeight() * 0.55f), 3.5f,
+                                  ImGui::ColorConvertFloat4ToU32(stateColor), 12);
+        ImGui::Dummy(ImVec2(10.0f, 1.0f));
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::TextColored(WithAlpha(stateColor, 0.8f), "%s", stateLabel);
+
+        // Right side: view mode and panels
+        const char* modeLabel = ui.editorView == Software::Slate::SlateEditorView::Preview ? "reading" : "editing";
+        const std::string right = std::string(modeLabel) + (ui.outlinePanelOpen ? "  |  outline" : "");
+        const float rightWidth = ImGui::CalcTextSize(right.c_str()).x;
+        ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 20.0f, ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - rightWidth));
+        ImGui::TextColored(Muted, "%s", right.c_str());
+
+        const ImVec2 lineStart(ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x, ImGui::GetCursorScreenPos().y + 4.0f);
+        drawList->AddLine(lineStart, ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x, lineStart.y),
+                          ImGui::ColorConvertFloat4ToU32(WithAlpha(Muted, 0.18f)), 1.0f);
+        ImGui::Dummy(ImVec2(1.0f, 10.0f));
+    }
+
+    Software::Slate::fs::path SlateEditorMode::ResolveImage(Software::Core::Runtime::AppContext& context, const std::string& target)
+    {
+        auto& workspace = WorkspaceContext(context);
+        const auto* document = workspace.Documents().Active();
+        if (!document || target.empty() || target.rfind("http", 0) == 0 || target.rfind("data:", 0) == 0)
+        {
+            return {};
+        }
+        if (m_imagePathsNote != document->relativePath)
+        {
+            m_imagePaths.clear();
+            m_imagePathsNote = document->relativePath;
+        }
+        if (const auto it = m_imagePaths.find(target); it != m_imagePaths.end())
+        {
+            return it->second;
+        }
+
+        std::string text = target;
+        for (std::size_t pos = text.find("%20"); pos != std::string::npos; pos = text.find("%20"))
+        {
+            text.replace(pos, 3, " ");
+        }
+        std::replace(text.begin(), text.end(), '\\', '/');
+        const auto root = workspace.Workspace().Root();
+        Software::Slate::fs::path resolved;
+        std::error_code ec;
+        const auto relativeToNote = (root / document->relativePath.parent_path() / Software::Slate::fs::u8path(text)).lexically_normal();
+        const auto relativeToRoot = (root / Software::Slate::fs::u8path(text.front() == '/' ? text.substr(1) : text)).lexically_normal();
+        if (Software::Slate::fs::exists(relativeToNote, ec))
+        {
+            resolved = relativeToNote;
+        }
+        else if (Software::Slate::fs::exists(relativeToRoot, ec))
+        {
+            resolved = relativeToRoot;
+        }
+        else
+        {
+            // Obsidian-style embeds name a file anywhere in the vault
+            const std::string wanted = Software::Slate::PathUtils::ToLower(Software::Slate::fs::u8path(text).filename().u8string());
+            for (const auto& entry : workspace.Workspace().Entries())
+            {
+                if (Software::Slate::PathUtils::ToLower(entry.relativePath.filename().u8string()) == wanted)
+                {
+                    resolved = root / entry.relativePath;
+                    break;
+                }
+            }
+        }
+        m_imagePaths[target] = resolved;
+        return resolved;
+    }
+
     void SlateEditorMode::DrawEditor(Software::Core::Runtime::AppContext& context,
-                                     Software::Slate::DocumentService::Document& document)
+                                     Software::Slate::DocumentService::Document& document,
+                                     bool handleInput)
     {
         auto& editor = EditorContext(context);
         auto& workspace = WorkspaceContext(context);
         auto& ui = UiState(context);
+        auto& shortcuts = workspace.Shortcuts();
         const auto& editorSettings = workspace.CurrentEditorSettings();
+        const bool reading = ui.editorView == Software::Slate::SlateEditorView::Preview;
+
         const float panelResponse = MotionResponse(editorSettings.panelMotion);
-        if (panelResponse <= 0.0f)
+        ui.outlinePanelProgress = panelResponse <= 0.0f
+                                      ? (ui.outlinePanelOpen ? 1.0f : 0.0f)
+                                      : ApproachValue(ui.outlinePanelProgress, ui.outlinePanelOpen ? 1.0f : 0.0f,
+                                                      context.frame.deltaSeconds, panelResponse);
+
+        DrawHeader(context, document);
+
+        // Slash palette state comes from the caret line; it owns arrows, tab, enter, and escape while open
+        std::vector<Software::Slate::SlashCommandDefinition> slashCommands;
+        if (editor.IsTextFocused() && !reading && !editor.HasSelection())
         {
-            ui.outlinePanelProgress = ui.outlinePanelOpen ? 1.0f : 0.0f;
-            ui.previewPanelProgress = ui.previewPanelOpen ? 1.0f : 0.0f;
+            std::string line;
+            std::size_t caretColumn = 0;
+            std::string query;
+            if (editor.ActiveLineTextAndCaret(&line, &caretColumn) &&
+                Software::Slate::SlashCommandService::QueryFromLineAtCaret(line, caretColumn, &query))
+            {
+                if (query != m_slashCommandQuery)
+                {
+                    m_slashCommandQuery = query;
+                    m_slashCommandIndex = 0;
+                }
+                if (!(m_slashCommandSuppressed && query == m_slashCommandSuppressedQuery))
+                {
+                    m_slashCommandSuppressed = false;
+                    slashCommands = Software::Slate::SlashCommandService::Filter(query, ExtensionSlashCommands(context));
+                }
+            }
+            else
+            {
+                m_slashCommandQuery.clear();
+                m_slashCommandSuppressed = false;
+            }
         }
-        else
+        const bool paletteOpen = !slashCommands.empty();
+        if (paletteOpen)
         {
-            ui.outlinePanelProgress = ApproachValue(ui.outlinePanelProgress,
-                                                    ui.outlinePanelOpen ? 1.0f : 0.0f,
-                                                    context.frame.deltaSeconds,
-                                                    panelResponse);
-            ui.previewPanelProgress = ApproachValue(ui.previewPanelProgress,
-                                                    ui.previewPanelOpen ? 1.0f : 0.0f,
-                                                    context.frame.deltaSeconds,
-                                                    panelResponse);
+            m_slashCommandIndex = std::clamp(m_slashCommandIndex, 0, static_cast<int>(slashCommands.size()) - 1);
         }
 
-        ImGui::TextColored(Muted, "%s", document.relativePath.generic_string().c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(document.conflict ? Red : (document.dirty ? Amber : Green), "%s",
-                           document.conflict ? "external change" : (document.dirty ? "dirty" : "saved"));
-
-        const float contentStartX = ImGui::GetCursorPosX();
-        const ImVec2 initialAvail = ImGui::GetContentRegionAvail();
-        const float initialConfiguredWidth = editorSettings.pageWidth > 0
-                                                 ? static_cast<float>(editorSettings.pageWidth)
-                                                 : initialAvail.x;
-        const EditorColumnLayout initialLayout = BuildEditorColumnLayout(initialAvail.x,
-                                                                         initialConfiguredWidth,
-                                                                         ui.outlinePanelProgress,
-                                                                         ui.previewPanelProgress,
-                                                                         editorSettings.panelLayout);
-        const float writingTextInset = 16.0f;
-
-        if (editor.Journal().IsJournalPath(document.relativePath))
+        if (handleInput && paletteOpen)
         {
-            ImGui::Dummy(ImVec2(1.0f, 10.0f));
-            ImGui::SetCursorPosX(contentStartX);
-            DrawJournalCompanion(context,
-                                 document,
-                                 initialAvail.x,
-                                 initialLayout.pageOffset + writingTextInset,
-                                 std::max(1.0f, initialLayout.pageWidth - writingTextInset));
-            ImGui::Dummy(ImVec2(1.0f, 12.0f));
-            ImGui::SetCursorPosX(contentStartX);
+            const int count = static_cast<int>(slashCommands.size());
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
+            {
+                m_slashCommandIndex = (m_slashCommandIndex + 1) % count;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
+            {
+                m_slashCommandIndex = (m_slashCommandIndex + count - 1) % count;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            {
+                m_slashCommandSuppressed = true;
+                m_slashCommandSuppressedQuery = m_slashCommandQuery;
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_Tab, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+            {
+                const auto selected = slashCommands[static_cast<std::size_t>(m_slashCommandIndex)];
+                ApplySlashCommand(context, document, selected);
+                return;
+            }
+        }
+        else if (handleInput && editor.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::Cancel))
+        {
+            editor.ReleaseFocus();
         }
 
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const float configuredWidth = editorSettings.pageWidth > 0
-                                          ? static_cast<float>(editorSettings.pageWidth)
-                                          : avail.x;
-        const EditorColumnLayout layout = BuildEditorColumnLayout(avail.x,
-                                                                  configuredWidth,
-                                                                  ui.outlinePanelProgress,
-                                                                  ui.previewPanelProgress,
-                                                                  editorSettings.panelLayout);
-        const float pageHeight = std::max(1.0f, avail.y - 52.0f);
-        const float rowStartY = ImGui::GetCursorPosY();
-        const float pageX = contentStartX + layout.pageOffset;
-        const int previewFollowLine = PreviewFollowLine(editor, editorSettings.previewFollowMode);
+        const float footer = 46.0f;
+        const float outlineWidth = std::min(280.0f, std::max(200.0f, avail.x * 0.2f)) * SmoothProgress(ui.outlinePanelProgress);
+        const float gap = outlineWidth > 1.0f ? 18.0f * SmoothProgress(ui.outlinePanelProgress) : 0.0f;
+        const float bodyHeight = std::max(1.0f, avail.y - footer);
+        const float bodyY = ImGui::GetCursorPosY();
+        const float bodyX = ImGui::GetCursorPosX();
 
-        if (layout.outlineWidth > 1.0f)
+        if (outlineWidth > 1.0f)
         {
-            ImGui::SetCursorPos(ImVec2(pageX - layout.outlineGap - layout.outlineWidth, rowStartY));
-            ImGui::BeginChild("OutlineSidePanel", ImVec2(layout.outlineWidth, pageHeight), false,
-                              ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+            ImGui::SetCursorPos(ImVec2(bodyX, bodyY));
+            ImGui::BeginChild("OutlineSidePanel", ImVec2(outlineWidth, bodyHeight), false, ImGuiWindowFlags_NoBackground);
             DrawOutlinePanel(context);
             ImGui::EndChild();
         }
 
-        if (layout.previewWidth > 1.0f)
+        // Right sidebar hosts panels contributed by plugins (backlinks, calendar, ...)
+        std::vector<const Software::Slate::ViewContribution*> sidebarViews;
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
         {
-            ImGui::SetCursorPos(ImVec2(pageX + layout.pageWidth + layout.previewGap, rowStartY));
-            ImGui::BeginChild("PreviewSidePanel", ImVec2(layout.previewWidth, pageHeight), false,
-                              ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar |
-                                  ImGuiWindowFlags_NoScrollWithMouse);
-            DrawMarkdownPreviewContent(context, document, layout.previewWidth);
-            const float maxScrollY = ImGui::GetScrollMaxY();
-            if (maxScrollY <= 1.0f)
+            for (const auto& view : registry->Views())
             {
-                ui.previewScrollY = 0.0f;
-                ui.previewScrollTargetY = 0.0f;
-                ui.previewLastFollowLine = -1;
+                if (view.location == Software::Slate::ViewLocation::Sidebar && ui.closedSidebarViews.count(view.id) == 0)
+                {
+                    sidebarViews.push_back(&view);
+                }
             }
-            else
-            {
-                const float currentScrollY = ImGui::GetScrollY();
-                const bool previewHovered = ImGui::IsWindowHovered();
-                const float wheel = ImGui::GetIO().MouseWheel;
-                if (previewHovered && wheel != 0.0f)
-                {
-                    const float wheelStep = std::max(42.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f);
-                    ui.previewScrollTargetY = std::clamp(ui.previewScrollTargetY - wheel * wheelStep, 0.0f, maxScrollY);
-                    ui.previewManualScrollUntil = context.frame.elapsedSeconds + 120.0;
-                    ui.previewLastFollowLine = previewFollowLine;
-                }
-                else if (previewHovered && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
-                         std::abs(currentScrollY - ui.previewScrollY) > 2.0f)
-                {
-                    ui.previewScrollTargetY = std::clamp(currentScrollY, 0.0f, maxScrollY);
-                    ui.previewManualScrollUntil = context.frame.elapsedSeconds + 120.0;
-                    ui.previewLastFollowLine = previewFollowLine;
-                }
-
-                const bool manualScrollHold = context.frame.elapsedSeconds < ui.previewManualScrollUntil &&
-                                              previewFollowLine == ui.previewLastFollowLine;
-                if (editorSettings.previewFollowMode != 0 &&
-                    !manualScrollHold)
-                {
-                    const int lineCount = static_cast<int>(
-                        std::max<std::size_t>(1, Software::Slate::MarkdownService::SplitLines(document.text).size()));
-                    const float normalizedLine =
-                        static_cast<float>(std::clamp(previewFollowLine - 1, 0, std::max(1, lineCount - 1))) /
-                        static_cast<float>(std::max(1, lineCount - 1));
-                    ui.previewScrollTargetY = std::clamp(maxScrollY * normalizedLine, 0.0f, maxScrollY);
-                    ui.previewLastFollowLine = previewFollowLine;
-                }
-
-                const float scrollResponse = ScrollResponse(editorSettings.scrollMotion);
-                const float targetScrollY = std::clamp(ui.previewScrollTargetY, 0.0f, maxScrollY);
-                ui.previewScrollY = scrollResponse <= 0.0f
-                                        ? targetScrollY
-                                        : ApproachValue(currentScrollY,
-                                                        targetScrollY,
-                                                        context.frame.deltaSeconds,
-                                                        scrollResponse);
-                ui.previewScrollY = std::clamp(ui.previewScrollY, 0.0f, maxScrollY);
-                ImGui::SetScrollY(ui.previewScrollY);
-            }
-            ImGui::EndChild();
         }
-
-        ImGui::SetCursorPos(ImVec2(pageX, rowStartY));
-        if (editor.NativeEditorAvailable())
+        const bool sidebarWanted = ui.sidebarOpen && !sidebarViews.empty() && avail.x > 900.0f;
+        ui.sidebarProgress = panelResponse <= 0.0f ? (sidebarWanted ? 1.0f : 0.0f)
+                                                   : ApproachValue(ui.sidebarProgress, sidebarWanted ? 1.0f : 0.0f,
+                                                                   context.frame.deltaSeconds, panelResponse);
+        const float sidebarWidth = std::min(320.0f, std::max(240.0f, avail.x * 0.22f)) * SmoothProgress(ui.sidebarProgress);
+        const float sidebarGap = sidebarWidth > 1.0f ? 18.0f * SmoothProgress(ui.sidebarProgress) : 0.0f;
+        if (sidebarWidth > 1.0f && !sidebarViews.empty())
         {
-            const float nativeScrollbarWidth = 10.0f;
-            const float nativeScrollbarGap = 6.0f;
-            const float nativeEditorWidth = std::max(1.0f, layout.pageWidth - nativeScrollbarWidth - nativeScrollbarGap);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, Background);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            ImGui::BeginChild("NativeMarkdownEditorPage", ImVec2(nativeEditorWidth, pageHeight), false,
-                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-            const ImVec2 editorPos = ImGui::GetWindowPos();
-            const ImVec2 editorSize = ImGui::GetWindowSize();
+            ImGui::SetCursorPos(ImVec2(bodyX + avail.x - sidebarWidth, bodyY));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, WithAlpha(Panel, 0.55f));
+            ImGui::BeginChild("NoteSidebar", ImVec2(sidebarWidth, bodyHeight), ImGuiChildFlags_AlwaysUseWindowPadding);
+            for (const auto* view : sidebarViews)
+            {
+                ImGui::PushID(view->id.c_str());
+                ImGui::TextColored(Muted, "%s", view->title.c_str());
+                ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::CalcTextSize("x").x - 2.0f);
+                ImGui::PushStyleColor(ImGuiCol_Text, WithAlpha(Muted, 0.6f));
+                if (ImGui::SmallButton("x"))
+                {
+                    ui.closedSidebarViews.insert(view->id);
+                }
+                ImGui::PopStyleColor();
+                const auto draw = view->draw;
+                if (draw)
+                {
+                    draw(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+                }
+                ImGui::Dummy(ImVec2(1.0f, 14.0f));
+                ImGui::PopID();
+            }
             ImGui::EndChild();
-            ImGui::PopStyleVar();
             ImGui::PopStyleColor();
-
-            if (editor.NativeEditorVisible())
-            {
-                editor.RenderNativeEditor(document,
-                                          workspace.Documents(),
-                                          context.frame.elapsedSeconds,
-                                          editorPos.x,
-                                          editorPos.y,
-                                          editorSize.x,
-                                          editorSize.y);
-            }
-
-            ImGui::SetCursorPos(ImVec2(pageX + nativeEditorWidth + nativeScrollbarGap, rowStartY));
-            int targetFirstLine = 0;
-            const auto scrollState = editor.NativeEditorScrollState();
-            if (DrawVerticalDocumentScrollbar("NativeEditorScrollbar",
-                                              ImVec2(nativeScrollbarWidth, pageHeight),
-                                              scrollState.firstVisibleLine,
-                                              scrollState.visibleLineCount,
-                                              scrollState.totalLineCount,
-                                              &targetFirstLine,
-                                              editorSettings.scrollbarStyle))
-            {
-                const float scrollResponse = ScrollResponse(editorSettings.scrollMotion);
-                if (scrollResponse <= 0.0f)
-                {
-                    ui.nativeEditorScrollTargetActive = false;
-                    editor.SetNativeEditorFirstVisibleLine(targetFirstLine);
-                }
-                else
-                {
-                    ui.nativeEditorScrollTargetLine = static_cast<float>(targetFirstLine);
-                    ui.nativeEditorScrollLine = static_cast<float>(scrollState.firstVisibleLine);
-                    ui.nativeEditorScrollTargetActive = true;
-                }
-            }
-            if (ui.nativeEditorScrollTargetActive)
-            {
-                const float scrollResponse = ScrollResponse(editorSettings.scrollMotion);
-                const float nextLine = scrollResponse <= 0.0f
-                                           ? ui.nativeEditorScrollTargetLine
-                                           : ApproachValue(static_cast<float>(scrollState.firstVisibleLine),
-                                                           ui.nativeEditorScrollTargetLine,
-                                                           context.frame.deltaSeconds,
-                                                           scrollResponse);
-                ui.nativeEditorScrollLine = nextLine;
-                editor.SetNativeEditorFirstVisibleLine(static_cast<int>(std::lround(nextLine)));
-                if (std::abs(nextLine - ui.nativeEditorScrollTargetLine) < 0.5f)
-                {
-                    ui.nativeEditorScrollTargetActive = false;
-                }
-            }
-
-            const int caretOffset = std::max(0, scrollState.caretLine - scrollState.firstVisibleLine);
-            const float paletteY = rowStartY + 24.0f +
-                                   std::min(pageHeight - 120.0f,
-                                            static_cast<float>(caretOffset) * ImGui::GetTextLineHeightWithSpacing());
-            DrawSlashCommandPalette(context,
-                                    document,
-                                    ImVec2(ImGui::GetWindowPos().x + pageX + 28.0f,
-                                           ImGui::GetWindowPos().y + paletteY),
-                                    std::min(420.0f, nativeEditorWidth - 24.0f));
-
-            ImGui::SetCursorPos(ImVec2(contentStartX, rowStartY + pageHeight));
-            return;
+            ImGui::PopStyleVar();
         }
 
-        ImGui::BeginChild("LiveMarkdownEditorPage", ImVec2(layout.pageWidth, pageHeight), false,
-                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
-        DrawLiveMarkdownEditor(context, document);
-        ImGui::EndChild();
-        const int fallbackCaretOffset = static_cast<int>(EditorContext(context).Editor().ActiveLine());
-        const float fallbackPaletteY = rowStartY + 24.0f +
-                                       std::min(pageHeight - 120.0f,
-                                                static_cast<float>(fallbackCaretOffset) * ImGui::GetTextLineHeightWithSpacing());
-        DrawSlashCommandPalette(context,
-                                document,
-                                ImVec2(ImGui::GetWindowPos().x + pageX + 28.0f,
-                                       ImGui::GetWindowPos().y + fallbackPaletteY),
-                                std::min(420.0f, layout.pageWidth - 24.0f));
-        ImGui::SetCursorPos(ImVec2(contentStartX, rowStartY + pageHeight));
+        const float editorX = bodyX + outlineWidth + gap;
+        const float editorWidth = std::max(1.0f, avail.x - outlineWidth - gap - sidebarWidth - sidebarGap);
+        ImGui::SetCursorPos(ImVec2(editorX, bodyY));
+
+        // Journal notes get their calendar and prompt above the page
+        if (editor.Journal().IsJournalPath(document.relativePath))
+        {
+            const float pageWidth = editorSettings.pageWidth > 0 ? std::min(static_cast<float>(editorSettings.pageWidth), editorWidth) : editorWidth;
+            const float inset = std::max(0.0f, (editorWidth - pageWidth) * 0.5f) + static_cast<float>(editorSettings.fontSize) * 1.2f;
+            ImGui::BeginGroup();
+            DrawJournalCompanion(context, document, editorWidth, inset, std::max(1.0f, pageWidth - 40.0f));
+            ImGui::EndGroup();
+        }
+
+        Software::Slate::Live::LiveEditorSettings settings;
+        settings.fontSize = static_cast<float>(editorSettings.fontSize);
+        settings.lineGap = static_cast<float>(editorSettings.lineSpacing);
+        settings.livePreview = editorSettings.livePreview;
+        settings.headingScale = editorSettings.headingScale;
+        settings.tabWidth = editorSettings.tabWidth;
+        settings.indentWithTabs = editorSettings.indentWithTabs;
+        settings.smartLists = editorSettings.autoListContinuation;
+        settings.highlightLine = editorSettings.highlightCurrentLine;
+        settings.readOnly = reading;
+        settings.captureNavigation = paletteOpen;
+        settings.acceptInput = handleInput;
+        settings.pageWidth = static_cast<float>(editorSettings.pageWidth);
+
+        Software::Slate::Live::LiveEditorHooks hooks;
+        hooks.openLink = [this](const std::string& target, bool isWikiLink) {
+            m_pendingLink = target;
+            m_pendingLinkIsWiki = isWikiLink;
+        };
+        hooks.openTag = [this](const std::string& tag) { m_pendingTag = tag; };
+        hooks.resolveImage = [this, &context](const std::string& target) { return ResolveImage(context, target); };
+
+        const float editorHeight = std::max(1.0f, bodyY + bodyHeight - ImGui::GetCursorPosY());
+        PushSlateScrollbarStyle(editorSettings.scrollbarStyle);
+        editor.DrawEditor(workspace.Documents(), "LiveMarkdownEditor", ImVec2(editorWidth, editorHeight), settings, hooks,
+                          context.frame.elapsedSeconds);
+        PopSlateScrollbarStyle();
+
+        if (paletteOpen && editor.IsTextFocused())
+        {
+            DrawSlashCommandPalette(context, slashCommands);
+        }
+        ImGui::SetCursorPos(ImVec2(bodyX, bodyY + bodyHeight));
     }
 
     void SlateEditorMode::DrawSlashCommandPalette(Software::Core::Runtime::AppContext& context,
-                                                   const Software::Slate::DocumentService::Document& document,
-                                                   ImVec2 preferredScreenPos,
-                                                   float preferredWidth)
+                                                  const std::vector<Software::Slate::SlashCommandDefinition>& commands)
     {
-        (void)document;
-
-        std::string line;
-        std::size_t caretColumn = 0;
-        std::string query;
         auto& editor = EditorContext(context);
-        if (editor.HasSelection())
-        {
-            m_slashCommandQuery.clear();
-            m_slashCommandSuppressed = false;
-            m_slashCommandSuppressedQuery.clear();
-            m_slashCommandIndex = 0;
-            editor.HideNativeSlashCommandPalette();
-            return;
-        }
-
-        if (!editor.ActiveLineTextAndCaret(&line, &caretColumn) ||
-            !Software::Slate::SlashCommandService::QueryFromLineAtCaret(line, caretColumn, &query))
-        {
-            m_slashCommandQuery.clear();
-            m_slashCommandSuppressed = false;
-            m_slashCommandSuppressedQuery.clear();
-            m_slashCommandIndex = 0;
-            editor.HideNativeSlashCommandPalette();
-            return;
-        }
-
-        if (m_slashCommandSuppressed && query == m_slashCommandSuppressedQuery)
-        {
-            editor.HideNativeSlashCommandPalette();
-            return;
-        }
-        if (query != m_slashCommandSuppressedQuery)
-        {
-            m_slashCommandSuppressed = false;
-            m_slashCommandSuppressedQuery.clear();
-        }
-
-        auto commands = Software::Slate::SlashCommandService::Filter(query, ExtensionSlashCommands(context));
-        if (query != m_slashCommandQuery)
-        {
-            m_slashCommandQuery = query;
-            m_slashCommandIndex = 0;
-        }
-        if (commands.empty())
-        {
-            editor.HideNativeSlashCommandPalette();
-            return;
-        }
-        m_slashCommandIndex = std::clamp(m_slashCommandIndex, 0, static_cast<int>(commands.size()) - 1);
-
-        if (editor.NativeEditorVisible())
-        {
-            editor.ShowNativeSlashCommandPalette(commands, m_slashCommandIndex);
-            return;
-        }
-
-        const std::size_t maxVisibleCount = 7;
-        const std::size_t visibleCount = std::min<std::size_t>(commands.size(), maxVisibleCount);
-        const int maxScrollOffset = std::max(0, static_cast<int>(commands.size()) - static_cast<int>(visibleCount));
-        int firstVisibleIndex = 0;
+        const auto& live = editor.Editor();
+        const std::size_t maxVisible = 8;
+        const std::size_t visibleCount = std::min(commands.size(), maxVisible);
+        int first = 0;
         if (m_slashCommandIndex >= static_cast<int>(visibleCount))
         {
-            firstVisibleIndex = m_slashCommandIndex - static_cast<int>(visibleCount) + 1;
+            first = m_slashCommandIndex - static_cast<int>(visibleCount) + 1;
         }
-        firstVisibleIndex = std::clamp(firstVisibleIndex, 0, maxScrollOffset);
 
-        const float width = std::max(360.0f, std::min(preferredWidth, 420.0f));
-        const float headerHeight = 24.0f;
-        const float rowHeight = ImGui::GetTextLineHeightWithSpacing() * 1.12f;
-        const float height = headerHeight + visibleCount * rowHeight + 6.0f;
-        ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-        ImGui::SetNextWindowPos(preferredScreenPos, ImGuiCond_Always);
+        float labelWidth = 0.0f;
+        for (const auto& command : commands)
+        {
+            labelWidth = std::max(labelWidth, ImGui::CalcTextSize(command.id.c_str()).x);
+        }
+        const float rowHeight = ImGui::GetTextLineHeight() + 10.0f;
+        const float width = std::clamp(labelWidth + 300.0f, 320.0f, 520.0f);
+        const float height = rowHeight * static_cast<float>(visibleCount) + 34.0f;
+
+        // Open below the caret, or above it when there is no room
+        ImVec2 position = live.CaretScreenPos();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        if (position.y + height > viewport->Pos.y + viewport->Size.y - 60.0f)
+        {
+            position.y -= height + live.CaretHeight() + 10.0f;
+        }
+        position.x = std::min(position.x, viewport->Pos.x + viewport->Size.x - width - 16.0f);
+
+        ImGui::SetNextWindowPos(position, ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(Panel.x, Panel.y, Panel.z, 0.985f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.42f));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 7.0f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, WithAlpha(Panel, 0.98f));
+        ImGui::PushStyleColor(ImGuiCol_Border, WithAlpha(Muted, 0.3f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 5.0f));
-        ImGui::Begin("##SlateSlashCommandPalette",
-                     nullptr,
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+        ImGui::Begin("##SlateSlashCommandPalette", nullptr,
                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_NoScrollbar);
 
         auto* drawList = ImGui::GetWindowDrawList();
         const ImVec2 windowMin = ImGui::GetWindowPos();
-        const ImVec2 windowMax(windowMin.x + width, windowMin.y + height);
-        const ImU32 headerRule = ImGui::ColorConvertFloat4ToU32(ImVec4(Cyan.x, Cyan.y, Cyan.z, 0.30f));
-        const ImU32 softRule = ImGui::ColorConvertFloat4ToU32(ImVec4(Muted.x, Muted.y, Muted.z, 0.14f));
-        drawList->AddLine(ImVec2(windowMin.x + 12.0f, windowMin.y + 22.0f),
-                          ImVec2(windowMax.x - 12.0f, windowMin.y + 22.0f),
-                          headerRule,
-                          1.0f);
+        drawList->AddText(ImVec2(windowMin.x + 14.0f, windowMin.y + 8.0f), ImGui::ColorConvertFloat4ToU32(Muted), "insert");
+        const char* hint = "tab/enter  esc";
+        const float hintWidth = ImGui::CalcTextSize(hint).x;
+        drawList->AddText(ImVec2(windowMin.x + width - hintWidth - 14.0f, windowMin.y + 8.0f),
+                          ImGui::ColorConvertFloat4ToU32(WithAlpha(Muted, 0.6f)), hint);
 
-        ImGui::TextColored(Cyan, "blocks");
-        ImGui::SameLine(width - 254.0f);
-        ImGui::TextColored(Muted, "(up/down) move   (tab) select");
-
-        ImGui::SetCursorScreenPos(ImVec2(windowMin.x + 10.0f, windowMin.y + headerHeight));
-
-        const float rowLeft = windowMin.x + 10.0f;
-        const float rowRight = windowMax.x - 10.0f;
         for (std::size_t i = 0; i < visibleCount; ++i)
         {
-            const std::size_t commandIndex = static_cast<std::size_t>(firstVisibleIndex) + i;
-            if (commandIndex >= commands.size())
+            const std::size_t index = static_cast<std::size_t>(first) + i;
+            if (index >= commands.size())
             {
                 break;
             }
-            const bool selected = static_cast<int>(commandIndex) == m_slashCommandIndex;
-            ImGui::PushID(static_cast<int>(i));
-            const ImVec2 rowMin(rowLeft, windowMin.y + headerHeight + static_cast<float>(i) * rowHeight);
-            const ImVec2 rowMax(rowRight, rowMin.y + rowHeight - 3.0f);
+            const auto& command = commands[index];
+            const bool selected = static_cast<int>(index) == m_slashCommandIndex;
+            const ImVec2 rowMin(windowMin.x + 6.0f, windowMin.y + 28.0f + static_cast<float>(i) * rowHeight);
+            const ImVec2 rowMax(windowMin.x + width - 6.0f, rowMin.y + rowHeight - 2.0f);
             if (selected)
             {
-                drawList->AddRectFilled(rowMin,
-                                        rowMax,
-                                        ImGui::ColorConvertFloat4ToU32(ImVec4(Green.x, Green.y, Green.z, 0.11f)),
-                                        6.0f);
+                drawList->AddRectFilled(rowMin, rowMax, ImGui::ColorConvertFloat4ToU32(WithAlpha(Green, 0.12f)), 6.0f);
+                drawList->AddRectFilled(rowMin, ImVec2(rowMin.x + 3.0f, rowMax.y), ImGui::ColorConvertFloat4ToU32(Green), 1.5f);
             }
-            else if (i > 0)
-            {
-                drawList->AddLine(ImVec2(rowMin.x + 8.0f, rowMin.y - 2.0f),
-                                  ImVec2(rowMax.x - 8.0f, rowMin.y - 2.0f),
-                                  ImGui::ColorConvertFloat4ToU32(ImVec4(Muted.x, Muted.y, Muted.z, 0.14f)),
-                                  1.0f);
-            }
-
-            const std::string commandId(commands[commandIndex].id);
-            drawList->AddText(ImVec2(rowMin.x + 16.0f, rowMin.y + 2.0f),
-                              ImGui::ColorConvertFloat4ToU32(selected ? Green : Primary),
-                              commandId.c_str());
+            const float textY = rowMin.y + 5.0f;
+            drawList->AddText(ImVec2(rowMin.x + 12.0f, textY), ImGui::ColorConvertFloat4ToU32(selected ? Green : Amber),
+                              ("/" + command.id).c_str());
+            drawList->PushClipRect(rowMin, rowMax, true);
+            drawList->AddText(ImVec2(rowMin.x + 30.0f + labelWidth, textY), ImGui::ColorConvertFloat4ToU32(selected ? Primary : Muted),
+                              command.description.c_str());
+            drawList->PopClipRect();
 
             ImGui::SetCursorScreenPos(rowMin);
-            ImGui::InvisibleButton("##slash-command-row", ImVec2(rowMax.x - rowMin.x, rowMax.y - rowMin.y));
-            if (ImGui::IsItemHovered())
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::InvisibleButton("##slash-row", ImVec2(rowMax.x - rowMin.x, rowMax.y - rowMin.y));
+            if (ImGui::IsItemHovered() && ImGui::GetIO().MouseDelta.x * ImGui::GetIO().MouseDelta.y != 0.0f)
             {
-                m_slashCommandIndex = static_cast<int>(commandIndex);
+                m_slashCommandIndex = static_cast<int>(index);
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
             {
-                ApplySlashCommand(context,
-                                  *WorkspaceContext(context).Documents().Active(),
-                                  commands[commandIndex]);
+                const auto selectedCommand = command;
+                ImGui::PopID();
+                ImGui::End();
+                ImGui::PopStyleVar(3);
+                ImGui::PopStyleColor(2);
+                ApplySlashCommand(context, *WorkspaceContext(context).Documents().Active(), selectedCommand);
+                return;
             }
             ImGui::PopID();
         }
         ImGui::End();
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(2);
-    }
-
-    void SlateEditorMode::SyncNativeChords(Software::Core::Runtime::AppContext& context)
-    {
-        auto& shortcuts = WorkspaceContext(context).Shortcuts();
-        std::vector<Software::Slate::NativeChordBinding> chords;
-
-        // Plain keys must keep typing text, so only modifier chords and function keys are intercepted
-        const auto add = [&chords](const Software::Slate::KeyBinding& binding, std::uint32_t command, std::string line) {
-            const bool functionKey = binding.key >= ImGuiKey_F1 && binding.key <= ImGuiKey_F12;
-            if (binding.key == ImGuiKey_None || (!binding.ctrl && !binding.alt && !functionKey))
-            {
-                return;
-            }
-            Software::Slate::NativeChordBinding chord;
-            chord.imguiKey = binding.key;
-            chord.ctrl = binding.ctrl;
-            chord.shift = binding.shift;
-            chord.alt = binding.alt;
-            chord.command = command;
-            chord.commandLine = std::move(line);
-            chords.push_back(std::move(chord));
-        };
-        const auto builtIn = [&](Software::Slate::ShortcutAction action, Software::Slate::NativeEditorCommand command) {
-            add(shortcuts.Binding(action), static_cast<std::uint32_t>(command), {});
-        };
-        builtIn(Software::Slate::ShortcutAction::EditorSave, Software::Slate::NativeEditorCommand::Save);
-        builtIn(Software::Slate::ShortcutAction::EditorFind, Software::Slate::NativeEditorCommand::Find);
-        builtIn(Software::Slate::ShortcutAction::EditorOutline, Software::Slate::NativeEditorCommand::Outline);
-        builtIn(Software::Slate::ShortcutAction::EditorPreview, Software::Slate::NativeEditorCommand::Preview);
-        add(shortcuts.Binding(Software::Slate::ShortcutAction::CommandPalette), 0, "__palette");
-        add(Software::Slate::KeyBinding{ImGuiKey_P, true, true, false}, 0, "__palette");
-
-        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
-        {
-            for (const auto& binding : registry->KeyBindings())
-            {
-                add(binding.binding, 0, binding.command);
-            }
-        }
-        EditorContext(context).SetNativeChordBindings(chords);
-    }
-
-    void SlateEditorMode::OpenLinkTarget(Software::Core::Runtime::AppContext& context, const std::string& rawTarget, bool isWikiLink)
-    {
-        auto& workspace = WorkspaceContext(context);
-        const std::string lower = Software::Slate::PathUtils::ToLower(rawTarget);
-        if (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0 || lower.rfind("mailto:", 0) == 0)
-        {
-#if defined(_WIN32)
-            ::ShellExecuteW(nullptr, L"open", Software::Slate::fs::u8path(rawTarget).wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#endif
-            SetStatus("opened " + rawTarget);
-            return;
-        }
-
-        std::string target = rawTarget.substr(0, rawTarget.find('#'));
-        for (std::size_t pos = target.find("%20"); pos != std::string::npos; pos = target.find("%20"))
-        {
-            target.replace(pos, 3, " ");
-        }
-        if (target.empty())
-        {
-            return;
-        }
-
-        const auto* document = workspace.Documents().Active();
-        const Software::Slate::fs::path folder = document ? document->relativePath.parent_path() : Software::Slate::fs::path();
-
-        if (isWikiLink)
-        {
-            // Wiki links match a note name anywhere, or a workspace relative path
-            const std::string wanted = Software::Slate::PathUtils::ToLower(target);
-            for (const auto& file : workspace.Workspace().MarkdownFiles())
-            {
-                const std::string stem = Software::Slate::PathUtils::ToLower(file.stem().u8string());
-                std::string relative = Software::Slate::PathUtils::ToLower(file.generic_u8string());
-                if (relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".md") == 0)
-                {
-                    relative.resize(relative.size() - 3);
-                }
-                if (stem == wanted || relative == wanted)
-                {
-                    OpenDocument(file, context);
-                    return;
-                }
-            }
-
-            Software::Slate::fs::path created;
-            std::string error;
-            if (!workspace.CreateNewNote(folder.empty() ? Software::Slate::fs::path(".") : folder, target, &created, &error))
-            {
-                SetError(error);
-                return;
-            }
-            OpenDocument(created, context);
-            SetStatus("created " + created.generic_u8string());
-            return;
-        }
-
-        const Software::Slate::fs::path relative = (folder / Software::Slate::fs::u8path(target)).lexically_normal();
-        const Software::Slate::fs::path absolute = workspace.Workspace().Resolve(relative);
-        std::error_code ec;
-        if (Software::Slate::fs::exists(absolute, ec))
-        {
-            if (Software::Slate::PathUtils::ToLower(relative.extension().u8string()) == ".md")
-            {
-                OpenDocument(relative, context);
-            }
-            else
-            {
-#if defined(_WIN32)
-                ::ShellExecuteW(nullptr, L"open", absolute.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#endif
-            }
-            return;
-        }
-        SetError("link target not found: " + target);
-    }
-
-    std::vector<Software::Slate::SlashCommandDefinition> SlateEditorMode::ExtensionSlashCommands(
-        Software::Core::Runtime::AppContext& context) const
-    {
-        std::vector<Software::Slate::SlashCommandDefinition> commands;
-        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
-        {
-            for (const auto& command : registry->SlashCommands())
-            {
-                commands.push_back({command.id, command.label, command.description,
-                                    Software::Slate::SlashCommandKind::Extension});
-            }
-        }
-        return commands;
-    }
-
-    bool SlateEditorMode::ApplySlashCommand(Software::Core::Runtime::AppContext& context,
-                                            Software::Slate::DocumentService::Document& document,
-                                            const Software::Slate::SlashCommandDefinition& command)
-    {
-        const Software::Slate::SlashCommandKind kind = command.kind;
-        auto& workspace = WorkspaceContext(context);
-        auto& editor = EditorContext(context);
-        const auto& editorSettings = workspace.CurrentEditorSettings();
-
-        std::string activeLine;
-        std::size_t caretColumn = 0;
-        std::string activeQuery;
-        std::size_t slashTokenStart = 0;
-        std::size_t slashTokenEnd = 0;
-        const bool hasSlashToken = editor.ActiveLineTextAndCaret(&activeLine, &caretColumn) &&
-                                   Software::Slate::SlashCommandService::QueryFromLineAtCaret(
-                                       activeLine, caretColumn, &activeQuery, &slashTokenStart, &slashTokenEnd);
-        auto replacementLine = [&](const std::string& replacement) {
-            if (!hasSlashToken)
-            {
-                return replacement;
-            }
-            return activeLine.substr(0, slashTokenStart) + replacement + activeLine.substr(slashTokenEnd);
-        };
-
-        m_slashCommandQuery.clear();
-        m_slashCommandSuppressed = false;
-        m_slashCommandSuppressedQuery.clear();
-        m_slashCommandIndex = 0;
-        editor.HideNativeSlashCommandPalette();
-
-        if (kind == Software::Slate::SlashCommandKind::Todo)
-        {
-            if (editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine("/todo"), context.frame.elapsedSeconds))
-            {
-                BeginTodoCreate(context, true);
-                return true;
-            }
-            return false;
-        }
-
-        if (kind == Software::Slate::SlashCommandKind::Image)
-        {
-            std::string markdown;
-            std::string error;
-            if (editorSettings.pasteClipboardImages && workspace.Assets().HasClipboardImage() &&
-                workspace.Assets().CreateMarkdownImageFromClipboard(
-                    document.relativePath,
-                    static_cast<Software::Slate::ImageStoragePolicy>(editorSettings.imageStoragePolicy),
-                    &markdown,
-                    &error))
-            {
-                if (editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(markdown), context.frame.elapsedSeconds))
-                {
-                    SetStatus("pasted image");
-                    return true;
-                }
-            }
-            else if (!error.empty())
-            {
-                SetError(error);
-            }
-        }
-
-        if (kind == Software::Slate::SlashCommandKind::Extension)
-        {
-            const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
-            const auto* extension = registry ? registry->FindSlashCommand(command.id) : nullptr;
-            if (!extension || !extension->run)
-            {
-                return false;
-            }
-
-            // Copy first: the plugin may re-register its commands while running
-            const auto run = extension->run;
-            std::string replacement;
-            std::string error;
-            if (!run(&replacement, &error))
-            {
-                SetError(error);
-                return false;
-            }
-
-            std::string normalized;
-            for (const char ch : replacement)
-            {
-                if (ch == '\n')
-                {
-                    normalized += document.lineEnding;
-                }
-                else if (ch != '\r')
-                {
-                    normalized.push_back(ch);
-                }
-            }
-            return editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(normalized), context.frame.elapsedSeconds);
-        }
-
-        const std::string replacement = Software::Slate::SlashCommandService::BuildMarkdownTemplate(kind, document.lineEnding);
-        if (replacement.empty())
-        {
-            return false;
-        }
-        const bool replaced = editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(replacement), context.frame.elapsedSeconds);
-        if (replaced)
-        {
-            switch (kind)
-            {
-            case Software::Slate::SlashCommandKind::Table:
-                SetStatus("inserted table");
-                break;
-            case Software::Slate::SlashCommandKind::Callout:
-                SetStatus("inserted callout");
-                break;
-            case Software::Slate::SlashCommandKind::Image:
-                SetStatus("inserted image placeholder");
-                break;
-            case Software::Slate::SlashCommandKind::CodeBlock:
-                SetStatus("inserted code block");
-                break;
-            case Software::Slate::SlashCommandKind::Checklist:
-                SetStatus("inserted checklist item");
-                break;
-            case Software::Slate::SlashCommandKind::Quote:
-                SetStatus("inserted quote");
-                break;
-            case Software::Slate::SlashCommandKind::Divider:
-                SetStatus("inserted divider");
-                break;
-            case Software::Slate::SlashCommandKind::Link:
-                SetStatus("inserted link");
-                break;
-            case Software::Slate::SlashCommandKind::Todo:
-            case Software::Slate::SlashCommandKind::Extension:
-                break;
-            }
-        }
-        return replaced;
     }
 
     void SlateEditorMode::DrawOutline(Software::Core::Runtime::AppContext& context)
@@ -1496,29 +732,27 @@ namespace Software::Modes::Slate
         ui.navigation.SetCount(ui.visibleHeadings.size());
         const std::size_t currentHeading = CurrentHeadingIndex(ui.visibleHeadings, CurrentCaretLine(editor));
 
+        const float width = CenteredColumnWidth(760.0f);
+        SetCursorCenteredForWidth(width);
+        ImGui::BeginGroup();
         ImGui::TextColored(Cyan, "outline");
-        ImGui::Separator();
-
+        ImGui::Dummy(ImVec2(1.0f, 6.0f));
         if (ui.visibleHeadings.empty())
         {
-            ImGui::TextColored(Muted, "no headings");
-            return;
+            ImGui::TextColored(Muted, "no headings yet. start a line with # to add one");
         }
-
         for (std::size_t i = 0; i < ui.visibleHeadings.size(); ++i)
         {
             const auto& heading = ui.visibleHeadings[i];
             const bool selected = i == ui.navigation.Selected();
             const bool current = i == currentHeading;
-            std::string indent(static_cast<std::size_t>(std::max(0, heading.level - 1)) * 2, ' ');
-            ImGui::TextColored(selected ? Green : (current ? Cyan : Primary),
-                               "%s %s%s  line %zu%s",
-                               selected ? ">" : (current ? "*" : " "),
-                               indent.c_str(),
-                               heading.title.c_str(),
-                               heading.line,
-                               current ? "  current" : "");
+            const std::string indent(static_cast<std::size_t>(std::max(0, heading.level - 1)) * 2, ' ');
+            ImGui::TextColored(selected ? Green : (current ? Cyan : Primary), "%s %s%s", selected ? ">" : " ", indent.c_str(),
+                               heading.title.c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(Muted, "%zu", heading.line);
         }
+        ImGui::EndGroup();
     }
 
     void SlateEditorMode::DrawOutlinePanel(Software::Core::Runtime::AppContext& context)
@@ -1529,32 +763,45 @@ namespace Software::Modes::Slate
         ui.visibleHeadings = editor.ParseHeadings(workspace.Documents());
         const std::size_t currentHeading = CurrentHeadingIndex(ui.visibleHeadings, CurrentCaretLine(editor));
 
-        ImGui::TextColored(Cyan, "outline");
-        ImGui::Separator();
-
+        ImGui::TextColored(Muted, "outline");
+        ImGui::Dummy(ImVec2(1.0f, 4.0f));
         if (ui.visibleHeadings.empty())
         {
-            ImGui::TextColored(Muted, "no headings");
+            ImGui::TextColored(WithAlpha(Muted, 0.7f), "no headings");
             return;
         }
 
+        auto* drawList = ImGui::GetWindowDrawList();
         for (std::size_t i = 0; i < ui.visibleHeadings.size(); ++i)
         {
             const auto& heading = ui.visibleHeadings[i];
             const bool current = i == currentHeading;
-            const std::string indent(static_cast<std::size_t>(std::max(0, heading.level - 1)) * 1, ' ');
-            ImGui::TextColored(current ? Cyan : Primary,
-                               "%s%s%s",
-                               current ? "* " : "  ",
-                               indent.c_str(),
-                               heading.title.c_str());
-            if (ImGui::IsItemClicked())
+            const float indent = static_cast<float>(std::max(0, heading.level - 1)) * 12.0f;
+            const ImVec2 start = ImGui::GetCursorScreenPos();
+            const float rowHeight = ImGui::GetTextLineHeight() + 6.0f;
+            ImGui::PushID(static_cast<int>(i));
+            const bool clicked = ImGui::InvisibleButton("##heading", ImVec2(ImGui::GetContentRegionAvail().x, rowHeight));
+            const bool hovered = ImGui::IsItemHovered();
+            ImGui::PopID();
+            if (current || hovered)
+            {
+                drawList->AddRectFilled(start, ImVec2(start.x + ImGui::GetContentRegionAvail().x, start.y + rowHeight),
+                                        ImGui::ColorConvertFloat4ToU32(WithAlpha(current ? Cyan : Muted, current ? 0.10f : 0.08f)), 4.0f);
+            }
+            if (current)
+            {
+                drawList->AddRectFilled(start, ImVec2(start.x + 2.0f, start.y + rowHeight), ImGui::ColorConvertFloat4ToU32(Cyan));
+            }
+            drawList->PushClipRect(start, ImVec2(start.x + ImGui::GetContentRegionAvail().x, start.y + rowHeight), true);
+            drawList->AddText(ImVec2(start.x + 10.0f + indent, start.y + 3.0f),
+                              ImGui::ColorConvertFloat4ToU32(current ? Cyan : (heading.level <= 1 ? Primary : WithAlpha(Primary, 0.75f))),
+                              heading.title.c_str());
+            drawList->PopClipRect();
+            if (clicked)
             {
                 editor.JumpToLine(heading.line);
                 ui.editorView = Software::Slate::SlateEditorView::Document;
             }
-            ImGui::SameLine();
-            ImGui::TextColored(current ? Green : Muted, "%zu%s", heading.line, current ? " *" : "");
         }
     }
 
@@ -1788,289 +1035,234 @@ namespace Software::Modes::Slate
                           ImGui::ColorConvertFloat4ToU32(Muted), label);
     }
 
-    void SlateEditorMode::DrawLiveMarkdownEditor(Software::Core::Runtime::AppContext& context,
-                                                 Software::Slate::DocumentService::Document& document)
+    void SlateEditorMode::OpenLinkTarget(Software::Core::Runtime::AppContext& context, const std::string& rawTarget, bool isWikiLink)
     {
-        auto& editorContext = EditorContext(context);
-        auto& editor = editorContext.Editor();
         auto& workspace = WorkspaceContext(context);
-        const auto& shortcuts = workspace.Shortcuts();
-        const auto& editorSettings = workspace.CurrentEditorSettings();
-        editor.EnsureLoaded(document.text, document.lineEnding);
-        const auto& lines = editor.Lines();
-
-        bool inCodeFence = false;
-        bool inFrontmatter = !lines.empty() && Software::Slate::PathUtils::Trim(lines.front()) == "---";
-        bool checkingFrontmatter = inFrontmatter;
-
-        const float configuredWidth = editorSettings.pageWidth > 0
-                                          ? static_cast<float>(editorSettings.pageWidth)
-                                          : ImGui::GetContentRegionAvail().x;
-        const float pageWidth = std::min(ImGui::GetContentRegionAvail().x, configuredWidth);
-        const float pageStartX = std::max(0.0f, (ImGui::GetContentRegionAvail().x - pageWidth) * 0.5f);
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float fontScale = EditorFontScale(editorSettings);
-        ImGui::SetWindowFontScale(fontScale);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-                            ImVec2(style.ItemSpacing.x, EditorLineSpacing(editorSettings)));
-        for (std::size_t i = 0; i < lines.size(); ++i)
+        const std::string lower = Software::Slate::PathUtils::ToLower(rawTarget);
+        if (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0 || lower.rfind("mailto:", 0) == 0)
         {
-            if (pageWidth > 1.0f)
+#if defined(_WIN32)
+            ::ShellExecuteW(nullptr, L"open", Software::Slate::fs::u8path(rawTarget).wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+            SetStatus("opened " + rawTarget);
+            return;
+        }
+
+        std::string target = rawTarget.substr(0, rawTarget.find('#'));
+        for (std::size_t pos = target.find("%20"); pos != std::string::npos; pos = target.find("%20"))
+        {
+            target.replace(pos, 3, " ");
+        }
+        if (target.empty())
+        {
+            return;
+        }
+
+        const auto* document = workspace.Documents().Active();
+        const Software::Slate::fs::path folder = document ? document->relativePath.parent_path() : Software::Slate::fs::path();
+
+        if (isWikiLink)
+        {
+            // Wiki links match a note name anywhere, or a workspace relative path
+            const std::string wanted = Software::Slate::PathUtils::ToLower(target);
+            for (const auto& file : workspace.Workspace().MarkdownFiles())
             {
-                ImGui::SetCursorPosX(pageStartX);
+                const std::string stem = Software::Slate::PathUtils::ToLower(file.stem().u8string());
+                std::string relative = Software::Slate::PathUtils::ToLower(file.generic_u8string());
+                if (relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".md") == 0)
+                {
+                    relative.resize(relative.size() - 3);
+                }
+                if (stem == wanted || relative == wanted)
+                {
+                    OpenDocument(file, context);
+                    return;
+                }
             }
 
-            const std::string trimmed = Software::Slate::PathUtils::Trim(lines[i]);
-            const bool lineIsFrontmatter = checkingFrontmatter;
-
-            ImGui::PushID(static_cast<int>(i));
-            ImGui::BeginGroup();
-            if (i == editor.ActiveLine())
+            Software::Slate::fs::path created;
+            std::string error;
+            if (!workspace.CreateNewNote(folder.empty() ? Software::Slate::fs::path(".") : folder, target, &created, &error))
             {
-                if (editor.FocusRequested())
-                {
-                    ImGui::SetKeyboardFocusHere();
-                    editor.ClearFocusRequest();
-                }
+                SetError(error);
+                return;
+            }
+            OpenDocument(created, context);
+            SetStatus("created " + created.generic_u8string());
+            return;
+        }
 
-                ImGui::SetNextItemWidth(pageWidth);
-                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.10f, 0.095f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                                      MarkdownLineBaseColor(editor.ActiveLineText(), inCodeFence, lineIsFrontmatter));
-                int cursor = editor.CaretColumn();
-                const int cursorBeforeInput = cursor;
-                const int lineSizeBeforeInput = static_cast<int>(editor.ActiveLineText().size());
-                const TextInputResult result = InputTextString("##LiveMarkdownLine", editor.ActiveLineText(),
-                                                               ImGuiInputTextFlags_EnterReturnsTrue,
-                                                               &cursor,
-                                                               editor.RequestedCursorColumn());
-                editor.SetCaretColumn(cursor);
-                editor.ClearRequestedCursorColumn();
-                editorContext.SetTextFocused(ImGui::IsItemActive());
-                ImGui::PopStyleColor(2);
-
-                if (result.edited)
-                {
-                    editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(), context.frame.elapsedSeconds);
-                }
-
-                std::string slashQuery;
-                auto slashCommands = Software::Slate::SlashCommandService::QueryFromLineAtCaret(
-                                         editor.ActiveLineText(),
-                                         static_cast<std::size_t>(std::max(0, editor.CaretColumn())),
-                                         &slashQuery)
-                                         ? Software::Slate::SlashCommandService::Filter(slashQuery, ExtensionSlashCommands(context))
-                                         : std::vector<Software::Slate::SlashCommandDefinition>{};
-                if (slashQuery != m_slashCommandQuery)
-                {
-                    m_slashCommandQuery = slashQuery;
-                    m_slashCommandIndex = 0;
-                }
-                if (m_slashCommandSuppressed && slashQuery != m_slashCommandSuppressedQuery)
-                {
-                    m_slashCommandSuppressed = false;
-                    m_slashCommandSuppressedQuery.clear();
-                }
-                if (!slashCommands.empty() && (!m_slashCommandSuppressed || slashQuery != m_slashCommandSuppressedQuery))
-                {
-                    m_slashCommandIndex = std::clamp(m_slashCommandIndex, 0, static_cast<int>(slashCommands.size()) - 1);
-                    if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-                    {
-                        m_slashCommandSuppressed = true;
-                        m_slashCommandSuppressedQuery = slashQuery;
-                        ImGui::EndGroup();
-                        ImGui::PopID();
-                        break;
-                    }
-                    if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true))
-                    {
-                        m_slashCommandIndex = (m_slashCommandIndex + 1) % static_cast<int>(slashCommands.size());
-                        ImGui::EndGroup();
-                        ImGui::PopID();
-                        break;
-                    }
-                    if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true))
-                    {
-                        m_slashCommandIndex = (m_slashCommandIndex + static_cast<int>(slashCommands.size()) - 1) %
-                                              static_cast<int>(slashCommands.size());
-                        ImGui::EndGroup();
-                        ImGui::PopID();
-                        break;
-                    }
-                    if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_Tab, false))
-                    {
-                        ApplySlashCommand(context,
-                                          document,
-                                          slashCommands[static_cast<std::size_t>(m_slashCommandIndex)]);
-                        ImGui::EndGroup();
-                        ImGui::PopID();
-                        break;
-                    }
-                }
-
-                if (result.submitted)
-                {
-                    editor.SplitActiveLine();
-                    editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(),
-                                                         context.frame.elapsedSeconds);
-                    ImGui::EndGroup();
-                    ImGui::PopID();
-                    break;
-                }
-
-                if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_Backspace, true) &&
-                    cursorBeforeInput <= 0 && editor.ActiveLine() > 0)
-                {
-                    if (editor.MergeActiveLineWithPrevious())
-                    {
-                        editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(), context.frame.elapsedSeconds);
-                    }
-                    ImGui::EndGroup();
-                    ImGui::PopID();
-                    break;
-                }
-
-                if (editorContext.IsTextFocused() && ImGui::IsKeyPressed(ImGuiKey_Delete, true) &&
-                    cursorBeforeInput >= lineSizeBeforeInput)
-                {
-                    if (editor.MergeActiveLineWithNext())
-                    {
-                        editorContext.CommitToActiveDocument(WorkspaceContext(context).Documents(), context.frame.elapsedSeconds);
-                    }
-                    ImGui::EndGroup();
-                    ImGui::PopID();
-                    break;
-                }
-
-                if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateUp, true) && editor.ActiveLine() > 0)
-                {
-                    editor.MoveActiveLine(-1);
-                    ImGui::EndGroup();
-                    ImGui::PopID();
-                    break;
-                }
-
-                if (editorContext.IsTextFocused() && shortcuts.Pressed(Software::Slate::ShortcutAction::NavigateDown, true) &&
-                    editor.ActiveLine() + 1 < lines.size())
-                {
-                    editor.MoveActiveLine(1);
-                    ImGui::EndGroup();
-                    ImGui::PopID();
-                    break;
-                }
+        const Software::Slate::fs::path relative = (folder / Software::Slate::fs::u8path(target)).lexically_normal();
+        const Software::Slate::fs::path absolute = workspace.Workspace().Resolve(relative);
+        std::error_code ec;
+        if (Software::Slate::fs::exists(absolute, ec))
+        {
+            if (Software::Slate::PathUtils::ToLower(relative.extension().u8string()) == ".md")
+            {
+                OpenDocument(relative, context);
             }
             else
             {
-                DrawMarkdownLine(lines[i], inCodeFence, lineIsFrontmatter, editorSettings.showWhitespace, fontScale);
+#if defined(_WIN32)
+                ::ShellExecuteW(nullptr, L"open", absolute.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
             }
-
-            ImGui::EndGroup();
-            if (ImGui::IsItemClicked())
-            {
-                editor.SetActiveLine(i, static_cast<int>(lines[i].size()));
-                editorContext.SetTextFocused(true);
-            }
-            ImGui::PopID();
-
-            if (checkingFrontmatter && i > 0 && trimmed == "---")
-            {
-                checkingFrontmatter = false;
-            }
-            else if (!checkingFrontmatter && (trimmed.rfind("```", 0) == 0 || trimmed.rfind("~~~", 0) == 0))
-            {
-                inCodeFence = !inCodeFence;
-            }
+            return;
         }
-        ImGui::PopStyleVar();
-        ImGui::SetWindowFontScale(1.0f);
+        SetError("link target not found: " + target);
     }
 
-    void SlateEditorMode::DrawMarkdownPreview(Software::Core::Runtime::AppContext& context,
-                                              const Software::Slate::DocumentService::Document& document)
+    std::vector<Software::Slate::SlashCommandDefinition> SlateEditorMode::ExtensionSlashCommands(
+        Software::Core::Runtime::AppContext& context) const
     {
-        const auto& workspace = WorkspaceContext(context);
-        const auto& editorSettings = workspace.CurrentEditorSettings();
-
-        ImGui::TextColored(Muted, "%s", document.relativePath.generic_string().c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(document.conflict ? Red : (document.dirty ? Amber : Green), "%s",
-                           document.conflict ? "external change" : (document.dirty ? "dirty" : "saved"));
-
-        const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const float configuredWidth = editorSettings.pageWidth > 0
-                                          ? static_cast<float>(editorSettings.pageWidth)
-                                          : avail.x;
-        const float pageWidth = std::min(avail.x, configuredWidth);
-        const float pageOffset = std::max(0.0f, (avail.x - pageWidth) * 0.5f);
-
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pageOffset);
-        ImGui::BeginChild("MarkdownPreviewPage", ImVec2(pageWidth, std::max(1.0f, avail.y - 52.0f)), false,
-                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysVerticalScrollbar);
-        DrawMarkdownPreviewContent(context, document, pageWidth);
-        ImGui::EndChild();
-    }
-
-    void SlateEditorMode::DrawMarkdownPreviewContent(Software::Core::Runtime::AppContext& context,
-                                                     const Software::Slate::DocumentService::Document& document,
-                                                     float contentWidth)
-    {
-        const auto lines = Software::Slate::MarkdownService::SplitLines(document.text);
-        bool inCodeFence = false;
-        bool inFrontmatter = !lines.empty() && Software::Slate::PathUtils::Trim(lines.front()) == "---";
-        bool checkingFrontmatter = inFrontmatter;
-        const auto& workspace = WorkspaceContext(context);
-        const auto& editorSettings = workspace.CurrentEditorSettings();
-        const float fontScale = EditorFontScale(editorSettings);
-
-        ImGui::SetWindowFontScale(fontScale);
-        ImGui::TextColored(Cyan, "preview");
-        ImGui::Separator();
-
-        const ImGuiStyle& style = ImGui::GetStyle();
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-                            ImVec2(style.ItemSpacing.x, EditorLineSpacing(editorSettings)));
-
-        for (std::size_t i = 0; i < lines.size();)
+        std::vector<Software::Slate::SlashCommandDefinition> commands;
+        if (const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>())
         {
-            const std::string trimmed = Software::Slate::PathUtils::Trim(lines[i]);
-            const bool lineIsFrontmatter = checkingFrontmatter;
+            for (const auto& command : registry->SlashCommands())
+            {
+                commands.push_back({command.id, command.label, command.description,
+                                    Software::Slate::SlashCommandKind::Extension});
+            }
+        }
+        return commands;
+    }
 
-            ImGui::PushID(static_cast<int>(i));
-            std::string imageAlt;
-            std::string imageTarget;
-            const bool startsTable = !inCodeFence && !lineIsFrontmatter && i + 1 < lines.size() &&
-                                     IsTableRow(lines[i]) && IsTableSeparator(lines[i + 1]);
+    bool SlateEditorMode::ApplySlashCommand(Software::Core::Runtime::AppContext& context,
+                                            Software::Slate::DocumentService::Document& document,
+                                            const Software::Slate::SlashCommandDefinition& command)
+    {
+        const Software::Slate::SlashCommandKind kind = command.kind;
+        auto& workspace = WorkspaceContext(context);
+        auto& editor = EditorContext(context);
+        const auto& editorSettings = workspace.CurrentEditorSettings();
 
-            if (startsTable)
+        std::string activeLine;
+        std::size_t caretColumn = 0;
+        std::string activeQuery;
+        std::size_t slashTokenStart = 0;
+        std::size_t slashTokenEnd = 0;
+        const bool hasSlashToken = editor.ActiveLineTextAndCaret(&activeLine, &caretColumn) &&
+                                   Software::Slate::SlashCommandService::QueryFromLineAtCaret(
+                                       activeLine, caretColumn, &activeQuery, &slashTokenStart, &slashTokenEnd);
+        auto replacementLine = [&](const std::string& replacement) {
+            if (!hasSlashToken)
             {
-                ImGui::PopID();
-                i = DrawMarkdownTableBlock(lines, i, editorSettings.lineSpacing);
-                continue;
+                return replacement;
             }
-            if (!inCodeFence && !lineIsFrontmatter && ParseMarkdownImage(trimmed, &imageAlt, &imageTarget))
-            {
-                const auto imagePath = ResolveMarkdownImageTarget(workspace.Workspace(), document.relativePath, imageTarget);
-                DrawMarkdownImage(imagePath, imageAlt, imageTarget, contentWidth);
-            }
-            else
-            {
-                DrawMarkdownLine(lines[i], inCodeFence, lineIsFrontmatter, editorSettings.showWhitespace, fontScale);
-            }
-            ImGui::PopID();
+            return activeLine.substr(0, slashTokenStart) + replacement + activeLine.substr(slashTokenEnd);
+        };
 
-            if (checkingFrontmatter && i > 0 && trimmed == "---")
-            {
-                checkingFrontmatter = false;
-            }
-            else if (!checkingFrontmatter && (trimmed.rfind("```", 0) == 0 || trimmed.rfind("~~~", 0) == 0))
-            {
-                inCodeFence = !inCodeFence;
-            }
+        m_slashCommandQuery.clear();
+        m_slashCommandSuppressed = false;
+        m_slashCommandSuppressedQuery.clear();
+        m_slashCommandIndex = 0;
 
-            ++i;
+        if (kind == Software::Slate::SlashCommandKind::Todo)
+        {
+            if (editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine("/todo"), context.frame.elapsedSeconds))
+            {
+                BeginTodoCreate(context, true);
+                return true;
+            }
+            return false;
         }
 
-        ImGui::PopStyleVar();
-        ImGui::SetWindowFontScale(1.0f);
+        if (kind == Software::Slate::SlashCommandKind::Image)
+        {
+            std::string markdown;
+            std::string error;
+            if (editorSettings.pasteClipboardImages && workspace.Assets().HasClipboardImage() &&
+                workspace.Assets().CreateMarkdownImageFromClipboard(
+                    document.relativePath,
+                    static_cast<Software::Slate::ImageStoragePolicy>(editorSettings.imageStoragePolicy),
+                    &markdown,
+                    &error))
+            {
+                if (editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(markdown), context.frame.elapsedSeconds))
+                {
+                    SetStatus("pasted image");
+                    return true;
+                }
+            }
+            else if (!error.empty())
+            {
+                SetError(error);
+            }
+        }
+
+        if (kind == Software::Slate::SlashCommandKind::Extension)
+        {
+            const auto registry = context.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+            const auto* extension = registry ? registry->FindSlashCommand(command.id) : nullptr;
+            if (!extension || !extension->run)
+            {
+                return false;
+            }
+
+            // Copy first: the plugin may re-register its commands while running
+            const auto run = extension->run;
+            std::string replacement;
+            std::string error;
+            if (!run(&replacement, &error))
+            {
+                SetError(error);
+                return false;
+            }
+
+            std::string normalized;
+            for (const char ch : replacement)
+            {
+                if (ch == '\n')
+                {
+                    normalized += document.lineEnding;
+                }
+                else if (ch != '\r')
+                {
+                    normalized.push_back(ch);
+                }
+            }
+            return editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(normalized), context.frame.elapsedSeconds);
+        }
+
+        const std::string replacement = Software::Slate::SlashCommandService::BuildMarkdownTemplate(kind, document.lineEnding);
+        if (replacement.empty())
+        {
+            return false;
+        }
+        const bool replaced = editor.ReplaceActiveLineWithText(workspace.Documents(), replacementLine(replacement), context.frame.elapsedSeconds);
+        if (replaced)
+        {
+            switch (kind)
+            {
+            case Software::Slate::SlashCommandKind::Table:
+                SetStatus("inserted table");
+                break;
+            case Software::Slate::SlashCommandKind::Callout:
+                SetStatus("inserted callout");
+                break;
+            case Software::Slate::SlashCommandKind::Image:
+                SetStatus("inserted image placeholder");
+                break;
+            case Software::Slate::SlashCommandKind::CodeBlock:
+                SetStatus("inserted code block");
+                break;
+            case Software::Slate::SlashCommandKind::Checklist:
+                SetStatus("inserted checklist item");
+                break;
+            case Software::Slate::SlashCommandKind::Quote:
+                SetStatus("inserted quote");
+                break;
+            case Software::Slate::SlashCommandKind::Divider:
+                SetStatus("inserted divider");
+                break;
+            case Software::Slate::SlashCommandKind::Link:
+                SetStatus("inserted link");
+                break;
+            case Software::Slate::SlashCommandKind::Todo:
+            case Software::Slate::SlashCommandKind::Extension:
+                break;
+            }
+        }
+        return replaced;
     }
 }

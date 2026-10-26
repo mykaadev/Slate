@@ -1380,6 +1380,7 @@ require = slate.require
             lua_setfield(L, -2, "plugin");
 
             lua_setglobal(L, "slate");
+            InstallViews(plugin);
             OpenSandboxedLibraries(L);
         }
 

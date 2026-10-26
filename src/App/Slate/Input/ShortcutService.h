@@ -39,6 +39,7 @@ namespace Software::Slate
         EditorSave,
         EditorPreview,
         EditorOutline,
+        EditorSidebar,
         EditorFind,
         SearchPrevious,
         SearchMode,

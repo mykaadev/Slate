@@ -59,6 +59,8 @@ namespace Software::Slate
         void Install(PluginInstance& plugin);
         // Removes everything the plugin contributed to shared registries
         void RemoveContributions(PluginInstance& plugin);
+        // Installs slate.view, slate.todos, and the ui widget table handed to view draw functions
+        void InstallViews(PluginInstance& plugin);
         // Returns steady-clock seconds used for call budgets
         double SteadySeconds();
     }

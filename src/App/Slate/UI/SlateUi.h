@@ -111,6 +111,8 @@ namespace Software::Slate::UI
     // Draws one markdown line with styling
     void DrawMarkdownLine(const std::string& line, bool inCodeFence, bool inFrontmatter = false,
                           bool showWhitespace = false, float fontScale = 1.0f);
+    // Loads (once) and returns the texture for an image file or data URI
+    bool LookupImageTexture(const fs::path& absolutePath, std::string_view target, ImTextureID* texture, ImVec2* size);
     // Draws one markdown image block
     void DrawMarkdownImage(const fs::path& absolutePath, std::string_view alt, std::string_view target,
                            float maxWidth);

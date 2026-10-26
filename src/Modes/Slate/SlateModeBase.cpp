@@ -123,7 +123,7 @@ namespace Software::Modes::Slate
     }
     void SlateModeBase::OnExit(Software::Core::Runtime::AppContext& context)
     {
-        EditorContext(context).SetNativeEditorVisible(false);
+        EditorContext(context).ReleaseFocus();
         m_prompt = {};
         m_confirm = {};
         if (auto* search = SearchOverlay(context))
@@ -161,9 +161,8 @@ namespace Software::Modes::Slate
             (TodoOverlay(context) && TodoOverlay(context)->IsAnyOpen());
         if (auto* todos = TodoOverlay(context); todos && todos->IsFormOpen())
         {
-            EditorContext(context).ReleaseNativeEditorFocus();
+            EditorContext(context).ReleaseFocus();
         }
-        EditorContext(context).SetNativeEditorVisible(WantsNativeEditorVisible(context) && !overlayOpen);
 
         DrawRootBegin(context);
 
@@ -386,7 +385,6 @@ namespace Software::Modes::Slate
         std::string error;
         if (workspace.SaveDocument(&error))
         {
-            editor.NotifyDocumentSaved();
             SetStatus("saved");
             if (wasDirty)
             {
@@ -445,6 +443,8 @@ namespace Software::Modes::Slate
 
         SetStatus("opened " + relativePath.generic_string());
         ActivateMode(Software::Slate::ModeIds::Editor, context);
+        // Leaving the previous screen released focus; a freshly opened note is ready to type into
+        editor.SetTextFocused(true);
         context.events.Publish(Software::Slate::Events::DocumentOpened{workspace.Documents().Active()->relativePath});
 
         const auto* document = workspace.Documents().Active();
@@ -1408,7 +1408,6 @@ namespace Software::Modes::Slate
     {
         if (WantsNativeEditorVisible(context))
         {
-            EditorContext(context).Editor().RequestFocus();
             EditorContext(context).SetTextFocused(true);
         }
     }

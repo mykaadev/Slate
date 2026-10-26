@@ -194,6 +194,7 @@ namespace Software::Slate
         add(ShortcutAction::EditorSave, "editor.save", "editor", "Save", Bind(ImGuiKey_S, true));
         add(ShortcutAction::EditorPreview, "editor.preview", "editor", "Preview", Bind(ImGuiKey_P, true));
         add(ShortcutAction::EditorOutline, "editor.outline", "editor", "Outline", Bind(ImGuiKey_O, true));
+        add(ShortcutAction::EditorSidebar, "editor.sidebar", "editor", "Sidebar panels", Bind(ImGuiKey_B, true, true));
         add(ShortcutAction::EditorFind, "editor.find", "editor", "Find", Bind(ImGuiKey_F, true));
         add(ShortcutAction::SearchPrevious, "search.previous", "search", "Previous match", Bind(ImGuiKey_Enter, false, true));
         add(ShortcutAction::SearchMode, "search.mode", "search", "Cycle search mode", Bind(ImGuiKey_Tab));
@@ -356,6 +357,7 @@ namespace Software::Slate
         case ShortcutAction::EditorSave: return "editor.save";
         case ShortcutAction::EditorPreview: return "editor.preview";
         case ShortcutAction::EditorOutline: return "editor.outline";
+        case ShortcutAction::EditorSidebar: return "editor.sidebar";
         case ShortcutAction::EditorFind: return "editor.find";
         case ShortcutAction::SearchPrevious: return "search.previous";
         case ShortcutAction::SearchMode: return "search.mode";

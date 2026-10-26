@@ -63,6 +63,30 @@ namespace Software::Slate
         std::string command;
     };
 
+    // Where a contributed view appears
+    enum class ViewLocation
+    {
+        // A full screen of its own, opened with :view <id>
+        Page,
+        // A panel in the right sidebar of the note screen
+        Sidebar
+    };
+
+    // A screen or panel drawn by a plugin or module
+    struct ViewContribution
+    {
+        // Stores the plugin or module that owns the view
+        std::string owner;
+        // Stores the globally unique view id
+        std::string id;
+        // Stores the visible title
+        std::string title;
+        // Stores where the view appears
+        ViewLocation location = ViewLocation::Page;
+        // Draws the view into the current ImGui region of the given size
+        std::function<void(float width, float height)> draw;
+    };
+
     // Collects UI contributions from plugins and modules so shell code never depends on a plugin runtime
     class SlateExtensionRegistry
     {
@@ -75,6 +99,12 @@ namespace Software::Slate
         void SetSlashCommand(SlashExtension command);
         // Adds or replaces one key binding for the same chord
         void SetKeyBinding(CommandKeyBinding binding);
+        // Adds or replaces one view by id
+        void SetView(ViewContribution view);
+        // Returns views in registration order
+        const std::vector<ViewContribution>& Views() const;
+        // Finds a view by id
+        const ViewContribution* FindView(const std::string& id) const;
         // Removes everything contributed by one owner
         void RemoveOwner(const std::string& owner);
 
@@ -96,6 +126,7 @@ namespace Software::Slate
         std::vector<StatusItem> m_statusItems;
         std::vector<SlashExtension> m_slashCommands;
         std::vector<CommandKeyBinding> m_keyBindings;
+        std::vector<ViewContribution> m_views;
         std::uint64_t m_keyBindingRevision = 1;
     };
 }

@@ -14,10 +14,6 @@ namespace Software::Slate::Modules
     void SlateEditorModule::Register(Software::Core::Runtime::ModuleContext& context)
     {
         m_editor = std::make_shared<Software::Slate::SlateEditorContext>();
-        if (const auto platformWindow = context.services.Resolve<Software::Platform::PlatformWindowService>())
-        {
-            m_editor->AttachToNativeWindow(platformWindow->NativeHandle());
-        }
         context.services.Register<Software::Slate::SlateEditorContext>(m_editor);
     }
 }

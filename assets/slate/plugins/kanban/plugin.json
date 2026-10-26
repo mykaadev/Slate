@@ -1,0 +1,9 @@
+{
+  "id": "kanban",
+  "name": "Kanban Board",
+  "version": "1.0.0",
+  "description": "Your todo documents as a drag-and-drop board",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

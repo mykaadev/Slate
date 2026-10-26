@@ -7,7 +7,7 @@
 
 namespace Software::Slate
 {
-    // Scintilla style ids produced by the live preview lexer. 32-39 are Scintilla's predefined styles.
+    // Style ids produced by the live preview line styler
     namespace LivePreviewStyle
     {
         enum : int
@@ -47,8 +47,6 @@ namespace Software::Slate
             Comment = 40,
         };
 
-        // Indicator used to draw strikethrough over completed tasks and ~~text~~
-        constexpr int StrikeIndicator = 8;
     }
 
     // Styles one line; kept free of Scintilla so the rules are unit testable
@@ -70,25 +68,4 @@ namespace Software::Slate
 
     // Returns the byte column of the checkbox mark ([ ] or [x]) under a column, if any.
     bool TaskMarkAt(std::string_view line, std::size_t column, std::size_t* markColumn);
-
-    // Opaque handle to the Scintilla lexer object so headers stay free of Scintilla includes
-    class LivePreviewLexerHandle
-    {
-    public:
-        // Creates the lexer; the returned pointer is owned by Scintilla once passed to SCI_SETILEXER
-        static void* Create(LivePreviewLexerHandle* handle);
-
-        // Sets which lines show raw markup; others hide it
-        void SetRevealRange(long long firstLine, long long lastLine);
-        // Turns hiding on or off; when off every line shows its markup
-        void SetHideMarkup(bool hide);
-        // Reports whether a line currently shows markup
-        bool Reveals(long long line) const;
-
-    private:
-        friend class LivePreviewLexer;
-        long long m_revealFirst = -1;
-        long long m_revealLast = -1;
-        bool m_hideMarkup = true;
-    };
 }

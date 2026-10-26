@@ -53,97 +53,6 @@ if(MSVC)
     target_compile_definitions(SlateLua PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-if(WIN32)
-    FetchContent_Declare(
-        scintilla_src
-        URL https://www.scintilla.org/scintilla561.zip
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(scintilla_src)
-
-    FetchContent_Declare(
-        lexilla_src
-        URL https://www.scintilla.org/lexilla546.zip
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(lexilla_src)
-
-    set(SCINTILLA_ROOT "${scintilla_src_SOURCE_DIR}")
-    if(EXISTS "${scintilla_src_SOURCE_DIR}/scintilla")
-        set(SCINTILLA_ROOT "${scintilla_src_SOURCE_DIR}/scintilla")
-    endif()
-
-    set(LEXILLA_ROOT "${lexilla_src_SOURCE_DIR}")
-    if(EXISTS "${lexilla_src_SOURCE_DIR}/lexilla")
-        set(LEXILLA_ROOT "${lexilla_src_SOURCE_DIR}/lexilla")
-    endif()
-
-    file(GLOB SCINTILLA_CORE_SOURCES CONFIGURE_DEPENDS
-        "${SCINTILLA_ROOT}/src/*.cxx"
-    )
-    list(APPEND SCINTILLA_CORE_SOURCES
-        "${SCINTILLA_ROOT}/win32/HanjaDic.cxx"
-        "${SCINTILLA_ROOT}/win32/ListBox.cxx"
-        "${SCINTILLA_ROOT}/win32/PlatWin.cxx"
-        "${SCINTILLA_ROOT}/win32/ScintillaWin.cxx"
-        "${SCINTILLA_ROOT}/win32/SurfaceD2D.cxx"
-        "${SCINTILLA_ROOT}/win32/SurfaceGDI.cxx"
-    )
-
-    add_library(ScintillaCore STATIC ${SCINTILLA_CORE_SOURCES})
-    target_include_directories(ScintillaCore PUBLIC
-        "${SCINTILLA_ROOT}/include"
-        "${SCINTILLA_ROOT}/src"
-        "${SCINTILLA_ROOT}/win32"
-    )
-    target_compile_definitions(ScintillaCore PRIVATE _CRT_SECURE_NO_WARNINGS)
-    target_link_libraries(ScintillaCore PUBLIC
-        user32
-        gdi32
-        imm32
-        ole32
-        oleaut32
-        advapi32
-    )
-
-    file(GLOB LEXILLA_SUPPORT_SOURCES CONFIGURE_DEPENDS
-        "${LEXILLA_ROOT}/lexlib/*.cxx"
-    )
-    file(READ "${LEXILLA_ROOT}/lexers/LexMarkdown.cxx" SLATE_LEX_MARKDOWN_SOURCE)
-    set(SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD [=[            if (sc.Match("](") && sc.GetRelative(-1) != '\\') {
-                sc.Forward(2);
-                isLinkNameDetecting = true;
-            }]=])
-    set(SLATE_LEX_MARKDOWN_EMPTY_LINK_NEW [=[            if (sc.Match("](") && sc.GetRelative(-1) != '\\') {
-                sc.Forward(2);
-                isLinkNameDetecting = true;
-                if (sc.ch == ')' && sc.GetRelative(-1) != '\\') {
-                    isLinkNameDetecting = false;
-                    sc.SetState(SCE_MARKDOWN_DEFAULT);
-                }
-            }]=])
-    string(FIND "${SLATE_LEX_MARKDOWN_SOURCE}" "${SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD}" SLATE_LEX_MARKDOWN_PATCH_AT)
-    if(SLATE_LEX_MARKDOWN_PATCH_AT EQUAL -1)
-        message(FATAL_ERROR "Could not patch LexMarkdown empty link handling.")
-    endif()
-    string(REPLACE "${SLATE_LEX_MARKDOWN_EMPTY_LINK_OLD}"
-                   "${SLATE_LEX_MARKDOWN_EMPTY_LINK_NEW}"
-                   SLATE_LEX_MARKDOWN_SOURCE
-                   "${SLATE_LEX_MARKDOWN_SOURCE}")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/Lexilla")
-    file(WRITE "${CMAKE_BINARY_DIR}/generated/Lexilla/LexMarkdownPatched.cxx" "${SLATE_LEX_MARKDOWN_SOURCE}")
-
-    add_library(SlateMarkdownLexer STATIC
-        ${LEXILLA_SUPPORT_SOURCES}
-        "${CMAKE_BINARY_DIR}/generated/Lexilla/LexMarkdownPatched.cxx"
-    )
-    target_include_directories(SlateMarkdownLexer PUBLIC
-        "${LEXILLA_ROOT}/include"
-        "${LEXILLA_ROOT}/lexlib"
-        "${SCINTILLA_ROOT}/include"
-    )
-    target_compile_definitions(SlateMarkdownLexer PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE=1)
-endif()
 find_package(OpenGL REQUIRED)
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/Core/Runtime")
 configure_file(
@@ -223,8 +132,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        ScintillaCore
-        SlateMarkdownLexer
         gdiplus
     )
 endif()
@@ -240,7 +147,6 @@ enable_testing()
 file(GLOB_RECURSE SLATE_CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/App/Slate/*.cpp"
 )
-list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/UI/.*")
 list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Overlays/.*")
 list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Modules/.*")
 list(FILTER SLATE_CORE_SOURCES EXCLUDE REGEX ".*/Commands/.*")
@@ -266,8 +172,7 @@ add_test(NAME SlateCoreTests COMMAND $<TARGET_FILE:SlateCoreTests>)
 
 if(WIN32)
     target_link_libraries(SlateCoreTests PRIVATE
-        ScintillaCore
-        SlateMarkdownLexer
+        gdiplus
     )
 endif()
 if(WIN32)

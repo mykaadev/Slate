@@ -7,4 +7,5 @@ namespace Software::Slate::ModeIds
     inline constexpr const char* Browser = "Slate.Browser";
     inline constexpr const char* Editor = "Slate.Editor";
     inline constexpr const char* Settings = "Slate.Settings";
+    inline constexpr const char* View = "Slate.View";
 }

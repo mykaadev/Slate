@@ -1,15 +1,6 @@
 #include "App/Slate/Editor/LivePreviewLexer.h"
 
-#if defined(_WIN32)
-#include <cassert>
-#include <string>
-#include <string_view>
 
-#include <ILexer.h>
-#include <Scintilla.h>
-#include <LexAccessor.h>
-#include <DefaultLexer.h>
-#endif
 
 #include <algorithm>
 #include <cctype>
@@ -661,101 +652,4 @@ namespace Software::Slate
         }
         return true;
     }
-
-    void LivePreviewLexerHandle::SetRevealRange(long long firstLine, long long lastLine)
-    {
-        m_revealFirst = firstLine;
-        m_revealLast = lastLine;
-    }
-
-    void LivePreviewLexerHandle::SetHideMarkup(bool hide)
-    {
-        m_hideMarkup = hide;
-    }
-
-    bool LivePreviewLexerHandle::Reveals(long long line) const
-    {
-        return !m_hideMarkup || (line >= m_revealFirst && line <= m_revealLast);
-    }
-
-#if defined(_WIN32)
-    // Scintilla lexer that asks the handle which lines reveal markup
-    class LivePreviewLexer final : public Lexilla::DefaultLexer
-    {
-    public:
-        explicit LivePreviewLexer(LivePreviewLexerHandle* handle)
-            : Lexilla::DefaultLexer("slate-markdown", 0), m_handle(handle)
-        {
-        }
-
-        void SCI_METHOD Lex(Sci_PositionU startPos, Sci_Position length, int, Scintilla::IDocument* document) override
-        {
-            const Sci_Position docLength = document->Length();
-            const Sci_Position endPos = std::min<Sci_Position>(docLength, static_cast<Sci_Position>(startPos) + length);
-            Sci_Position line = document->LineFromPosition(static_cast<Sci_Position>(startPos));
-            const Sci_Position lastLine = document->LineFromPosition(std::max<Sci_Position>(static_cast<Sci_Position>(startPos), endPos - 1));
-            int state = line > 0 ? document->GetLineState(line - 1) : 0;
-
-            std::string text;
-            for (; line <= lastLine; ++line)
-            {
-                const Sci_Position lineStart = document->LineStart(line);
-                const Sci_Position contentEnd = document->LineEnd(line);
-                const Sci_Position nextStart = std::min<Sci_Position>(docLength, document->LineStart(line + 1));
-                text.resize(static_cast<std::size_t>(std::max<Sci_Position>(0, contentEnd - lineStart)));
-                if (!text.empty())
-                {
-                    document->GetCharRange(text.data(), lineStart, static_cast<Sci_Position>(text.size()));
-                }
-
-                LivePreviewLine styled = StyleLivePreviewLine(text, line == 0, state, m_handle->Reveals(line));
-
-                // Line endings share the style of the block they close so filled backgrounds reach the edge
-                char eolStyle = static_cast<char>(LivePreviewStyle::Default);
-                if (!styled.styles.empty())
-                {
-                    const char last = styled.styles.back();
-                    if (last == LivePreviewStyle::CodeBlock || last == LivePreviewStyle::Fence || last == LivePreviewStyle::Frontmatter)
-                    {
-                        eolStyle = last;
-                    }
-                }
-                else if ((state & FenceLengthMask) != 0 && (styled.stateOut & FenceLengthMask) != 0)
-                {
-                    eolStyle = static_cast<char>(LivePreviewStyle::CodeBlock);
-                }
-                styled.styles.resize(static_cast<std::size_t>(std::max<Sci_Position>(0, nextStart - lineStart)), eolStyle);
-
-                document->StartStyling(lineStart);
-                if (!styled.styles.empty())
-                {
-                    document->SetStyles(static_cast<Sci_Position>(styled.styles.size()), styled.styles.data());
-                }
-                document->SetLineState(line, styled.stateOut);
-
-                document->DecorationSetCurrentIndicator(LivePreviewStyle::StrikeIndicator);
-                document->DecorationFillRange(lineStart, 0, nextStart - lineStart);
-                for (const auto& [start, end] : styled.strikes)
-                {
-                    document->DecorationFillRange(lineStart + static_cast<Sci_Position>(start), 1,
-                                                  static_cast<Sci_Position>(end - start));
-                }
-                state = styled.stateOut;
-            }
-        }
-
-    private:
-        LivePreviewLexerHandle* m_handle = nullptr;
-    };
-
-    void* LivePreviewLexerHandle::Create(LivePreviewLexerHandle* handle)
-    {
-        return static_cast<Scintilla::ILexer5*>(new LivePreviewLexer(handle));
-    }
-#else
-    void* LivePreviewLexerHandle::Create(LivePreviewLexerHandle*)
-    {
-        return nullptr;
-    }
-#endif
 }

@@ -6,6 +6,7 @@
 #include "Modes/Slate/SlateEditorMode.h"
 #include "Modes/Slate/SlateHomeMode.h"
 #include "Modes/Slate/SlateSettingsMode.h"
+#include "Modes/Slate/SlateViewMode.h"
 #include "Modes/Slate/SlateWorkspaceMode.h"
 
 #include <memory>
@@ -33,6 +34,9 @@ namespace Software::Slate::Modules
         });
         context.tools.Register(Software::Slate::ModeIds::Settings, []() {
             return std::make_unique<Software::Modes::Slate::SlateSettingsMode>();
+        });
+        context.tools.Register(Software::Slate::ModeIds::View, []() {
+            return std::make_unique<Software::Modes::Slate::SlateViewMode>();
         });
     }
 }

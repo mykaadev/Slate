@@ -5,6 +5,7 @@
 #include "App/Slate/Workspace/WorkspaceService.h"
 #include "App/Slate/Workspace/WorkspaceTree.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -121,5 +122,13 @@ namespace Software::Slate
         FolderPickerAction folderPickerAction = FolderPickerAction::None;
         // Asks the settings screen to select the plugin section on its next frame
         bool settingsJumpToPlugins = false;
+        // Stores the page view shown by the view screen
+        std::string activeView;
+        // Stores sidebar views the user closed; every other sidebar view shows
+        std::set<std::string> closedSidebarViews;
+        // Marks whether the right sidebar of the note screen is visible
+        bool sidebarOpen = true;
+        // Stores the sidebar reveal animation progress
+        float sidebarProgress = 1.0f;
     };
 }

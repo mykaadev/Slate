@@ -2,12 +2,15 @@
 
 #include "App/Slate/Core/AppPaths.h"
 #include "App/Slate/Documents/DocumentService.h"
+#include "App/Slate/Core/SlateModeIds.h"
+#include "App/Slate/Extensions/SlateExtensionRegistry.h"
 #include "App/Slate/Extensions/SlateShellBridge.h"
 #include "App/Slate/Plugins/PluginManager.h"
 #include "App/Slate/State/SlateUiState.h"
 #include "Core/Runtime/AppContext.h"
 #include "Core/Runtime/CommandRegistry.h"
 #include "Core/Runtime/ServiceLocator.h"
+#include "Core/Runtime/ToolRegistry.h"
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -147,6 +150,56 @@ namespace Software::Slate::Modules
                 return plugins->SetEnabled(request.arguments, false, &error)
                            ? CommandResult::Handled(request.id, "disabled " + request.arguments)
                            : CommandResult::Failed(request.id, error);
+            }));
+
+        context.commands.Register(MakeCommand(
+            "slate.view.open", "Open View", "Open a full-screen view contributed by a plugin.", {"view"}, true,
+            [](AppContext& app, const CommandRequest& request) {
+                const auto registry = app.services.Resolve<Software::Slate::SlateExtensionRegistry>();
+                const auto* view = registry ? registry->FindView(request.arguments) : nullptr;
+                if (!view)
+                {
+                    return CommandResult::Failed(request.id, "no view named " + request.arguments);
+                }
+                if (view->location == Software::Slate::ViewLocation::Sidebar)
+                {
+                    if (const auto ui = app.services.Resolve<Software::Slate::SlateUiState>())
+                    {
+                        ui->sidebarOpen = true;
+                        ui->closedSidebarViews.erase(view->id);
+                    }
+                    return CommandResult::Handled(request.id);
+                }
+                if (const auto ui = app.services.Resolve<Software::Slate::SlateUiState>())
+                {
+                    ui->activeView = view->id;
+                }
+                app.tools.Activate(Software::Slate::ModeIds::View, app);
+                return CommandResult::Handled(request.id);
+            }));
+
+        context.commands.Register(MakeCommand(
+            "slate.sidebar.toggle", "Toggle Sidebar", "Show or hide the note sidebar, or one panel by id.", {"sidebar", "panel"}, true,
+            [](AppContext& app, const CommandRequest& request) {
+                const auto ui = app.services.Resolve<Software::Slate::SlateUiState>();
+                if (!ui)
+                {
+                    return CommandResult::Failed(request.id, "ui not ready");
+                }
+                if (request.arguments.empty())
+                {
+                    ui->sidebarOpen = !ui->sidebarOpen;
+                    return CommandResult::Handled(request.id);
+                }
+                if (ui->closedSidebarViews.erase(request.arguments) == 0)
+                {
+                    ui->closedSidebarViews.insert(request.arguments);
+                }
+                else
+                {
+                    ui->sidebarOpen = true;
+                }
+                return CommandResult::Handled(request.id);
             }));
 
         context.commands.Register(MakeCommand(

@@ -1,0 +1,9 @@
+{
+  "id": "calendar",
+  "name": "Calendar",
+  "version": "1.0.0",
+  "description": "Sidebar month calendar for journal notes",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

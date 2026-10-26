@@ -884,13 +884,18 @@ end)
         }
 
         const ImGuiIO& io = ImGui::GetIO();
-        if (io.WantTextInput)
-        {
-            return;
-        }
+        const auto editor = m_app->services.Resolve<SlateEditorContext>();
+        const bool typing = io.WantTextInput || (editor && editor->IsTextFocused());
 
         for (const auto& binding : registry->KeyBindings())
         {
+            // While typing, plain keys type text; only modifier chords and function keys reach plugins
+            const bool chord = binding.binding.ctrl || binding.binding.alt ||
+                               (binding.binding.key >= ImGuiKey_F1 && binding.binding.key <= ImGuiKey_F12);
+            if (typing && !chord)
+            {
+                continue;
+            }
             if (binding.binding.key != ImGuiKey_None &&
                 ImGui::IsKeyPressed(binding.binding.key, false) &&
                 io.KeyCtrl == binding.binding.ctrl &&

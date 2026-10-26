@@ -130,6 +130,28 @@ namespace Software::Platform
         TryLoadFont(io, "C:/Windows/Fonts/CascadiaCode.ttf");
         TryLoadFont(io, "C:/Windows/Fonts/consola.ttf");
 
+        // Symbol and emoji fallbacks fill in glyphs the monospace font lacks (bullets, arrows, vault emoji)
+        if (io.Fonts->Fonts.Size > 0)
+        {
+            for (const char* fallback : {"C:/Windows/Fonts/seguisym.ttf", "C:/Windows/Fonts/seguiemj.ttf"})
+            {
+                FILE* file = nullptr;
+#if defined(_MSC_VER)
+                fopen_s(&file, fallback, "rb");
+#else
+                file = fopen(fallback, "rb");
+#endif
+                if (!file)
+                {
+                    continue;
+                }
+                fclose(file);
+                ImFontConfig config;
+                config.MergeMode = true;
+                io.Fonts->AddFontFromFileTTF(fallback, 18.0f, &config);
+            }
+        }
+
         ImGui::StyleColorsDark();
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 0.0f;

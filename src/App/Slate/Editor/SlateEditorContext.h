@@ -1,14 +1,12 @@
 #pragma once
 
 #include "App/Slate/Documents/DocumentService.h"
-#include "App/Slate/Editor/EditorDocumentViewModel.h"
+#include "App/Slate/Editor/Live/LiveEditor.h"
 #include "App/Slate/Markdown/JournalService.h"
 #include "App/Slate/Markdown/MarkdownService.h"
-#include "App/Slate/Editor/ScintillaEditorHost.h"
 #include "App/Slate/Workspace/WorkspaceService.h"
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,11 +18,6 @@ namespace Software::Slate
     class SlateEditorContext
     {
     public:
-        // Builds the editor services
-        SlateEditorContext();
-        // Cleans up native editor resources
-        ~SlateEditorContext();
-
         // Returns the markdown parser service
         MarkdownService& Markdown();
         // Returns the markdown parser service as const
@@ -35,23 +28,29 @@ namespace Software::Slate
         // Returns the journal helper service as const
         const JournalService& Journal() const;
 
-        // Returns the line based editor model
-        EditorDocumentViewModel& Editor();
-        // Returns the line based editor model as const
-        const EditorDocumentViewModel& Editor() const;
+        // Returns the live Markdown editor
+        Live::LiveEditor& Editor();
+        // Returns the live Markdown editor as const
+        const Live::LiveEditor& Editor() const;
 
-        // Reports whether text input currently owns focus
+        // Reports whether the editor currently owns the keyboard
         bool IsTextFocused() const;
-        // Updates text focus for the active editor path
+        // Gives or takes keyboard focus
         void SetTextFocused(bool focused);
+        // Takes keyboard focus away from the editor
+        void ReleaseFocus();
 
-        // Loads the active document into both editor paths
+        // Loads the active document into the editor
         void LoadFromActiveDocument(const DocumentService& documents);
-        // Clears both editor paths
+        // Clears the editor
         void Clear();
-        // Writes current editor text back into the active document
+        // Writes editor text back into the active document when it changed
         bool CommitToActiveDocument(DocumentService& documents, double elapsedSeconds);
-        // Moves the caret to a source line
+        // Draws the editor for the active document and commits edits
+        void DrawEditor(DocumentService& documents, const char* id, ImVec2 size, const Live::LiveEditorSettings& settings,
+                        const Live::LiveEditorHooks& hooks, double elapsedSeconds);
+
+        // Moves the caret to a 1-based source line
         void JumpToLine(std::size_t line);
         // Inserts text at the current cursor
         void InsertTextAtCursor(DocumentService& documents, const std::string& text, double elapsedSeconds);
@@ -59,9 +58,9 @@ namespace Software::Slate
         bool ActiveLineText(std::string* text) const;
         // Reads the current active line text and caret column.
         bool ActiveLineTextAndCaret(std::string* text, std::size_t* caretColumn) const;
-        // Reports whether the active editor path currently has selected text.
+        // Reports whether the editor has selected text.
         bool HasSelection() const;
-        // Reads the selected text of the active editor path
+        // Reads the selected text
         bool SelectedText(std::string* text) const;
         // Reads the caret as 1-based line and byte column
         bool CaretPosition(std::size_t* line, std::size_t* column) const;
@@ -82,56 +81,18 @@ namespace Software::Slate
                                 ImageStoragePolicy imageStoragePolicy, double elapsedSeconds,
                                 std::string* error = nullptr);
 
-        // Attaches the native editor host to the app window
-        void AttachToNativeWindow(void* nativeHandle);
-        // Reports whether the native editor can be used
-        bool NativeEditorAvailable() const;
-        // Reports whether the native editor is visible
-        bool NativeEditorVisible() const;
-        // Shows or hides the native editor
-        void SetNativeEditorVisible(bool visible);
-        // Applies editor settings to the native editor
-        void SetNativeEditorSettings(const EditorSettings& settings);
-        // Renders the native editor using a screen rectangle
-        void RenderNativeEditor(const DocumentService::Document& document,
-                                DocumentService& documents,
-                                double elapsedSeconds,
-                                float screenX,
-                                float screenY,
-                                float width,
-                                float height);
-        // Returns scroll state from the native editor
-        ScintillaEditorHost::ScrollState NativeEditorScrollState() const;
-        // Moves the native editor viewport to a line
-        void SetNativeEditorFirstVisibleLine(int line);
-        // Notifies the native editor that a save completed
-        void NotifyDocumentSaved();
-        // Pulls one pending command from the native editor
-        bool ConsumeNativeCommand(NativeEditorCommand command);
-        // Pulls the ctrl+clicked link target from the native editor
-        bool ConsumeNativeOpenLink(std::string* target, bool* isWikiLink);
-        // Replaces the key chords the native editor intercepts while focused
-        void SetNativeChordBindings(const std::vector<NativeChordBinding>& bindings);
-        // Pulls one command line raised by a native editor chord
-        bool ConsumeNativeChordCommand(std::string* commandLine);
-        // Shows native slash-command suggestions above the Scintilla editor window.
-        void ShowNativeSlashCommandPalette(const std::vector<SlashCommandDefinition>& commands, int selectedIndex);
-        // Hides native slash-command suggestions.
-        void HideNativeSlashCommandPalette();
-        // Releases focus from the native editor
-        void ReleaseNativeEditorFocus();
-
     private:
+        // Loads the active document when the editor shows a different file
+        void EnsureLoaded(const DocumentService& documents);
+
         // Stores the markdown parser
         MarkdownService m_markdown;
         // Stores the journal helper
         JournalService m_journal;
-        // Stores the fallback line editor
-        EditorDocumentViewModel m_editor;
-        // Stores the native editor host when available
-        std::unique_ptr<ScintillaEditorHost> m_nativeEditor;
-        // Tracks focus for the fallback editor path
-        bool m_textFocused = false;
+        // Stores the live editor
+        Live::LiveEditor m_editor;
+        // Stores the editor revision last written into the document
+        std::uint64_t m_committedRevision = 0;
         // Marks whether the cached journal summary is current
         bool m_journalSummaryValid = false;
         // Stores the hash used to validate the journal cache

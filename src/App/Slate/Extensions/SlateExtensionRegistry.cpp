@@ -86,6 +86,7 @@ namespace Software::Slate
         RemoveByOwner(&m_homeEntries, owner);
         RemoveByOwner(&m_statusItems, owner);
         RemoveByOwner(&m_slashCommands, owner);
+        RemoveByOwner(&m_views, owner);
         if (RemoveByOwner(&m_keyBindings, owner))
         {
             ++m_keyBindingRevision;
@@ -123,5 +124,33 @@ namespace Software::Slate
     std::uint64_t SlateExtensionRegistry::KeyBindingRevision() const
     {
         return m_keyBindingRevision;
+    }
+
+    void SlateExtensionRegistry::SetView(ViewContribution view)
+    {
+        auto existing = std::find_if(m_views.begin(), m_views.end(), [&](const ViewContribution& candidate) {
+            return candidate.id == view.id;
+        });
+        if (existing == m_views.end())
+        {
+            m_views.push_back(std::move(view));
+        }
+        else
+        {
+            *existing = std::move(view);
+        }
+    }
+
+    const std::vector<ViewContribution>& SlateExtensionRegistry::Views() const
+    {
+        return m_views;
+    }
+
+    const ViewContribution* SlateExtensionRegistry::FindView(const std::string& id) const
+    {
+        const auto it = std::find_if(m_views.begin(), m_views.end(), [&](const ViewContribution& view) {
+            return view.id == id;
+        });
+        return it == m_views.end() ? nullptr : &(*it);
     }
 }

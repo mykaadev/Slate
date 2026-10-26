@@ -30,7 +30,7 @@ namespace Software::Slate
         // Renders Markdown in place and hides syntax away from the caret line
         bool livePreview = true;
         // Draws headings larger than body text; Scintilla grows every line to the tallest style
-        bool headingScale = false;
+        bool headingScale = true;
         // Editor font family; must be installed on the system
         std::string fontFamily = "Cascadia Mono";
     };

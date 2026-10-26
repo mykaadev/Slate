@@ -1,0 +1,9 @@
+{
+  "id": "backlinks",
+  "name": "Backlinks",
+  "version": "1.0.0",
+  "description": "Sidebar panel listing notes that link to the open note",
+  "author": "Slate",
+  "main": "main.lua",
+  "api": 1
+}

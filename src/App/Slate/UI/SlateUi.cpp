@@ -714,6 +714,49 @@ namespace Software::Slate::UI
         return Primary;
     }
 
+    bool LookupImageTexture(const fs::path& absolutePath, std::string_view target, ImTextureID* texture, ImVec2* size)
+    {
+#if defined(_WIN32)
+        const bool embeddedDataImage = target.rfind("data:image/", 0) == 0;
+        const std::string cacheKey = embeddedDataImage
+                                         ? (std::string("data-image-") + std::to_string(std::hash<std::string_view>{}(target)))
+                                         : (absolutePath.empty() ? std::string(target)
+                                                                 : absolutePath.lexically_normal().string());
+        auto& cached = ImageCache()[cacheKey];
+        if (cached.texture == 0 && !cached.failed)
+        {
+            if (embeddedDataImage)
+            {
+                std::vector<unsigned char> bytes;
+                cached.failed = !DataUriImageBytes(target, &bytes) || !LoadTextureFromMemory(bytes, &cached);
+            }
+            else
+            {
+                cached.failed = absolutePath.empty() || !LoadTextureFromFile(absolutePath, &cached);
+            }
+        }
+        if (cached.texture == 0 || cached.width <= 0 || cached.height <= 0)
+        {
+            return false;
+        }
+        if (texture)
+        {
+            *texture = static_cast<ImTextureID>(cached.texture);
+        }
+        if (size)
+        {
+            *size = ImVec2(static_cast<float>(cached.width), static_cast<float>(cached.height));
+        }
+        return true;
+#else
+        (void)absolutePath;
+        (void)target;
+        (void)texture;
+        (void)size;
+        return false;
+#endif
+    }
+
     void DrawMarkdownImage(const fs::path& absolutePath, std::string_view alt, std::string_view target,
                            float maxWidth)
     {

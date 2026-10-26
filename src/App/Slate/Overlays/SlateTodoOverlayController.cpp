@@ -120,7 +120,7 @@ namespace Software::Slate
             if (auto* editor = EditorContext(context))
             {
                 editor->CommitToActiveDocument(workspace->Documents(), context.frame.elapsedSeconds);
-                editor->ReleaseNativeEditorFocus();
+                editor->ReleaseFocus();
             }
             m_listOpen = true;
             m_navigation.Reset();
@@ -142,10 +142,8 @@ namespace Software::Slate
         std::string activeLine;
         const bool hasActiveLine = editor->ActiveLineText(&activeLine);
         const auto* active = documents.Active();
-        const std::size_t activeLineNumber =
-            editor->NativeEditorAvailable()
-                ? static_cast<std::size_t>(std::max(1, editor->NativeEditorScrollState().caretLine + 1))
-                : (editor->Editor().ActiveLine() + 1);
+        std::size_t activeLineNumber = 1;
+        editor->CaretPosition(&activeLineNumber, nullptr);
         const bool launchedFromTodoCommand = fromSlashCommand ||
                                              (hasActiveLine && IsSlashCommand(activeLine));
 
@@ -167,7 +165,7 @@ namespace Software::Slate
             RemovePendingCommand(context);
         }
 
-        editor->ReleaseNativeEditorFocus();
+        editor->ReleaseFocus();
         m_form.title = "Untitled todo";
         m_form.description = "Description";
         m_form.open = true;
@@ -236,7 +234,7 @@ namespace Software::Slate
         {
             if (auto* editor = EditorContext(context))
             {
-                editor->ReleaseNativeEditorFocus();
+                editor->ReleaseFocus();
             }
             DrawForm(context, callbacks);
         }
@@ -725,8 +723,7 @@ namespace Software::Slate
         active->text = std::move(updatedText);
         documents.MarkEdited(context.frame.elapsedSeconds);
         editor->LoadFromActiveDocument(documents);
-        editor->ReleaseNativeEditorFocus();
-        editor->SetNativeEditorVisible(false);
+        editor->ReleaseFocus();
         editor->JumpToLine(std::min(removeIndex + 1, lines.size()));
         return true;
     }
