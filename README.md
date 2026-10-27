@@ -3,11 +3,13 @@
   <h1>Slate</h1>
   <p><strong>A quiet, local-first home for Markdown notes, journals, and todos.</strong></p>
 
-  <p>
-    <a href="https://github.com/mykaadev/Slate/releases"><img src="https://img.shields.io/github/v/release/mykaadev/Slate?style=flat-square" alt="Latest release"></a>
-    <a href="https://github.com/mykaadev/Slate/issues"><img src="https://img.shields.io/github/issues/mykaadev/Slate?style=flat-square" alt="Open issues"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-70a080?style=flat-square" alt="MIT license"></a>
-  </p>
+<div align="center">
+    <a href="https://github.com/mykaadev/Slate/commits/main"><img src="https://img.shields.io/github/last-commit/mykaadev/Slate?style=plastic&logo=github&logoColor=white" alt="GitHub Last Commit"></a>
+    <a href="https://github.com/mykaadev/Slate/issues"><img src="https://img.shields.io/github/issues-raw/mykaadev/Slate?style=plastic&logo=github&logoColor=white" alt="GitHub Issues"></a>
+    <a href="https://github.com/mykaadev/Slate/pulls"><img src="https://img.shields.io/github/issues-pr-raw/mykaadev/Slate?style=plastic&logo=github&logoColor=white" alt="GitHub Pull Requests"></a>
+    <a href="https://github.com/mykaadev/Slate"><img src="https://img.shields.io/github/stars/mykaadev/Slate?style=plastic&logo=github" alt="GitHub Stars"></a>
+    <a href="https://twitter.com/mykaadev/"><img src="https://img.shields.io/twitter/follow/mykaadev?style=plastic&logo=x" alt="Twitter Follow"></a>
+</div>
 </div>
 
 ![Slate home screen](resources/LandingPage.png)
