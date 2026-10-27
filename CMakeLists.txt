@@ -193,6 +193,11 @@ install(FILES
 )
 
 install(DIRECTORY
+    "${CMAKE_SOURCE_DIR}/resources"
+    DESTINATION "docs"
+)
+
+install(DIRECTORY
     "${CMAKE_SOURCE_DIR}/assets/slate"
     DESTINATION "assets"
 )

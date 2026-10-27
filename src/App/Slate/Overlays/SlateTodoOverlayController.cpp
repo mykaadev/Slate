@@ -118,6 +118,7 @@ namespace Software::Slate
                 editor->ReleaseFocus();
             }
             m_listOpen = true;
+            m_todosDirty = true;
             m_navigation.Reset();
         }
     }
@@ -170,7 +171,9 @@ namespace Software::Slate
     {
         m_listOpen = false;
         m_stateFilter = 0;
+        m_allTodos.clear();
         m_visibleTodos.clear();
+        m_todosDirty = true;
         m_navigation.Reset();
         m_form = {};
     }
@@ -257,17 +260,24 @@ namespace Software::Slate
         const bool allowInput = !m_form.open && shortcuts;
         if (!workspace)
         {
+            m_allTodos.clear();
             m_visibleTodos.clear();
+            m_todosDirty = false;
         }
-        else if (const auto todoService = context.services.Resolve<TodoService>())
+        else if (m_todosDirty)
         {
-            m_visibleTodos = todoService->CollectTodos(*workspace);
-        }
-        else
-        {
-            m_visibleTodos.clear();
+            if (const auto todoService = context.services.Resolve<TodoService>())
+            {
+                m_allTodos = todoService->CollectTodos(*workspace);
+            }
+            else
+            {
+                m_allTodos.clear();
+            }
+            m_todosDirty = false;
         }
 
+        m_visibleTodos = m_allTodos;
         m_visibleTodos.erase(std::remove_if(m_visibleTodos.begin(),
                                             m_visibleTodos.end(),
                                             [this](const auto& todo) {
@@ -638,6 +648,7 @@ namespace Software::Slate
             RemovePendingCommand(context);
         }
 
+        m_todosDirty = true;
         m_form = {};
         if (!m_listOpen && callbacks.restoreEditorFocus)
         {
@@ -884,6 +895,7 @@ namespace Software::Slate
     void SlateTodoOverlayController::RefreshEditorAfterMutation(Software::Core::Runtime::AppContext& context,
                                                                 const TodoMutationResult& result)
     {
+        m_todosDirty = true;
         if (!result.touchedActiveDocument)
         {
             return;

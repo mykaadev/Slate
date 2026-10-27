@@ -5,6 +5,7 @@
 #include "App/Slate/Input/ShortcutService.h"
 #include "Core/Runtime/AppContext.h"
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -104,5 +105,11 @@ namespace Software::Slate
 
         /** Current search mode. */
         SearchMode m_mode = SearchMode::FileNames;
+
+        /** True when the visible results no longer match the search inputs. */
+        bool m_resultsDirty = true;
+
+        /** Search index revision used for the visible workspace results. */
+        std::uint64_t m_resultsRevision = 0;
     };
 }

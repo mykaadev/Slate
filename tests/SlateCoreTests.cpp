@@ -7,6 +7,7 @@
 #include "App/Slate/Markdown/MarkdownService.h"
 #include "App/Slate/Core/NavigationController.h"
 #include "App/Slate/Workspace/SearchService.h"
+#include "App/Slate/State/SlateWorkspaceContext.h"
 #include "App/Slate/Todos/TodoService.h"
 #include "App/Slate/Workspace/ThemeService.h"
 #include "App/Slate/UI/SlateUi.h"
@@ -115,6 +116,10 @@ namespace
         Software::Slate::WorkspaceService workspace(root);
         Software::Slate::SearchService search;
         search.Rebuild(workspace);
+        const auto initialRevision = search.Revision();
+        CHECK(initialRevision > 0);
+        search.Rebuild(workspace);
+        CHECK(search.Revision() == initialRevision);
         const auto filenameResults = search.Query("shield");
         CHECK(filenameResults.empty());
         const auto combatResults = search.Query("combat");
@@ -129,6 +134,12 @@ namespace
         CHECK(docResults.size() == 2);
         CHECK(docResults.front().line == 2);
         CHECK(docResults.front().column == 1);
+
+        WriteFile(root / "GDD.md", "# Combat\nThe player has a stronger barrier.\n");
+        search.Rebuild(workspace);
+        CHECK(search.Revision() > initialRevision);
+        const auto changedResults = search.Query("barrier", Software::Slate::SearchMode::FullText);
+        CHECK(!changedResults.empty());
         fs::remove_all(root);
     }
 
@@ -493,6 +504,41 @@ namespace
         CHECK(ticket.description == "Keep todo details editable\nAdd useful notes");
         CHECK(ticket.line == 7);
         CHECK(!Software::Slate::TodoService::IsTodoDocument("# Normal note\n", "Notes/Normal.md"));
+    }
+
+    void TestTodoCollectionCacheInvalidation()
+    {
+        const fs::path root = MakeTempWorkspace();
+        const fs::path todoPath = root / "Todos" / "cached.md";
+        WriteFile(todoPath,
+                  Software::Slate::TodoService::FormatTodoDocument(
+                      Software::Slate::TodoState::Open, "Cached", "First description"));
+
+        Software::Slate::SlateWorkspaceContext workspace;
+        CHECK(workspace.OpenWorkspace(root));
+        Software::Slate::TodoService todos;
+        const auto first = todos.CollectTodos(workspace);
+        CHECK(first.size() == 1);
+        CHECK(first.front().title == "Cached");
+
+        WriteFile(todoPath,
+                  Software::Slate::TodoService::FormatTodoDocument(
+                      Software::Slate::TodoState::Doing, "Changed cache", "A longer changed description"));
+        const auto changed = todos.CollectTodos(workspace);
+        CHECK(changed.size() == 1);
+        CHECK(changed.front().title == "Changed cache");
+        CHECK(changed.front().state == Software::Slate::TodoState::Doing);
+
+        Software::Slate::TodoMutationResult result;
+        CHECK(todos.CreateTodo(workspace,
+                               Software::Slate::TodoState::Open,
+                               "Second todo",
+                               "Created after the cache was warm",
+                               1.0,
+                               &result));
+        const auto afterCreate = todos.CollectTodos(workspace);
+        CHECK(afterCreate.size() == 2);
+        fs::remove_all(root);
     }
 
     void TestEditorDocumentReplaceActiveLineWithText()
@@ -974,6 +1020,7 @@ int main()
     TestMarkdownInlineSpans();
     TestMarkdownTagsAndTodos();
     TestTodoDocumentFormattingAndParsing();
+    TestTodoCollectionCacheInvalidation();
     TestEditorDocumentReplaceActiveLineWithText();
     TestWorkspaceRegistry();
     TestThemeServiceRoundTrip();

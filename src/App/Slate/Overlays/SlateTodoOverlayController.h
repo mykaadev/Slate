@@ -161,11 +161,17 @@ namespace Software::Slate
         /** Filtered todos currently shown by the list overlay. */
         std::vector<TodoTicket> m_visibleTodos;
 
+        /** Unfiltered todos loaded when the list opened or changed. */
+        std::vector<TodoTicket> m_allTodos;
+
         /** Create/edit form state. */
         TodoFormState m_form;
 
         /** True while the list overlay is visible. */
         bool m_listOpen = false;
+
+        /** True when the todo list must load workspace changes. */
+        bool m_todosDirty = true;
 
         /** Current state filter index, where zero means all states. */
         int m_stateFilter = 0;

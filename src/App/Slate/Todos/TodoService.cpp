@@ -222,6 +222,15 @@ namespace Software::Slate
     std::vector<TodoTicket> TodoService::CollectTodos(const SlateWorkspaceContext& workspace) const
     {
         std::vector<TodoTicket> todos;
+        const auto& workspaceRoot = workspace.Workspace().Root();
+        if (m_cacheRoot != workspaceRoot)
+        {
+            m_cacheRoot = workspaceRoot;
+            m_fileCache.clear();
+        }
+        std::unordered_map<std::string, CachedTodoFile> nextCache;
+        nextCache.reserve(workspace.Workspace().MarkdownFiles().size());
+
         const auto* activeDocument = workspace.Documents().Active();
         const auto activePath = activeDocument ? PathUtils::NormalizeRelative(activeDocument->relativePath)
                                                : fs::path{};
@@ -234,8 +243,46 @@ namespace Software::Slate
             {
                 text = activeDocument->text;
             }
-            else if (!DocumentService::ReadTextFile(workspace.Workspace().Resolve(relativePath), &text, nullptr))
+            else
             {
+                const auto key = normalized.generic_u8string();
+                const auto absolute = workspace.Workspace().Resolve(relativePath);
+                std::error_code ec;
+                const auto writeTime = fs::last_write_time(absolute, ec);
+                if (ec)
+                {
+                    continue;
+                }
+                const auto fileSize = fs::file_size(absolute, ec);
+                if (ec)
+                {
+                    continue;
+                }
+
+                const auto cached = m_fileCache.find(key);
+                if (cached != m_fileCache.end() && cached->second.writeTime == writeTime &&
+                    cached->second.fileSize == fileSize)
+                {
+                    nextCache.emplace(key, cached->second);
+                    if (cached->second.isTodo)
+                    {
+                        todos.push_back(cached->second.todo);
+                    }
+                    continue;
+                }
+
+                CachedTodoFile entry;
+                entry.writeTime = writeTime;
+                entry.fileSize = fileSize;
+                if (DocumentService::ReadTextFile(absolute, &text, nullptr))
+                {
+                    entry.isTodo = ParseTodoDocument(text, normalized, &entry.todo);
+                }
+                if (entry.isTodo)
+                {
+                    todos.push_back(entry.todo);
+                }
+                nextCache.emplace(key, std::move(entry));
                 continue;
             }
 
@@ -246,6 +293,7 @@ namespace Software::Slate
             }
             todos.push_back(std::move(todo));
         }
+        m_fileCache = std::move(nextCache);
 
         std::sort(todos.begin(), todos.end(), [](const auto& left, const auto& right) {
             const int leftState = TodoService::StateSortKey(left.state);
@@ -287,6 +335,7 @@ namespace Software::Slate
         (void)elapsedSeconds;
         PopulateResult(result, created, 7, false);
         RefreshWorkspaceAfterTodoMutation(workspace);
+        InvalidateCache();
         return true;
     }
 
@@ -310,6 +359,7 @@ namespace Software::Slate
             documents.MarkEdited(elapsedSeconds);
             PopulateResult(result, normalized, 7, true);
             RefreshWorkspaceAfterTodoMutation(workspace);
+            InvalidateCache();
             return true;
         }
 
@@ -328,6 +378,7 @@ namespace Software::Slate
 
         PopulateResult(result, normalized, 7, false);
         RefreshWorkspaceAfterTodoMutation(workspace);
+        InvalidateCache();
         return true;
     }
 
@@ -352,7 +403,13 @@ namespace Software::Slate
 
         PopulateResult(result, normalized, 1, false);
         RefreshWorkspaceAfterTodoMutation(workspace);
+        InvalidateCache();
         return true;
+    }
+
+    void TodoService::InvalidateCache() const
+    {
+        m_fileCache.clear();
     }
 
     bool TodoService::IsTodoDocument(std::string_view text, const fs::path& relativePath)

@@ -40,3 +40,5 @@ external/glfw/.DS_Store
 /out/
 /cmake-build-*/
 CMakeUserPresets.json
+/build-verify
+/graphify-out

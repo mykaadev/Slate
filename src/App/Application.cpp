@@ -1,7 +1,9 @@
 #include "Application.h"
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <GLFW/glfw3.h>
@@ -62,9 +64,12 @@ namespace Software::Core::App
         context.frame.deltaSeconds = 0.0;
         context.frame.frameIndex = 0;
 
+        constexpr auto minimumFrameTime = std::chrono::duration<double>(1.0 / 120.0);
+
         // Drives the app until the window closes or the app asks to quit
         while (!platform.ShouldClose() && !context.quitRequested)
         {
+            const auto frameStartedAt = std::chrono::steady_clock::now();
             platform.PollEvents();
 
             const double now = glfwGetTime();
@@ -88,6 +93,14 @@ namespace Software::Core::App
             tools.DrawUI(context);
 
             platform.EndFrame();
+
+            // Limit the frame rate when the graphics driver does not obey VSync.
+            const auto frameFinishedAt = std::chrono::steady_clock::now();
+            const auto frameTime = frameFinishedAt - frameStartedAt;
+            if (frameTime < minimumFrameTime)
+            {
+                std::this_thread::sleep_for(minimumFrameTime - frameTime);
+            }
         }
 
         // Clears platform resources before leaving

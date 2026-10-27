@@ -4,6 +4,7 @@
 
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Software::Slate
@@ -92,10 +93,28 @@ namespace Software::Slate
         static bool MatchesQuery(const TodoTicket& todo, const std::string& query);
 
     private:
+        /** Cached parse result for one Markdown file. */
+        struct CachedTodoFile
+        {
+            fs::file_time_type writeTime{};
+            std::uintmax_t fileSize = 0;
+            bool isTodo = false;
+            TodoTicket todo;
+        };
+
+        /** Clears cached file results after this service changes the workspace. */
+        void InvalidateCache() const;
+
         /** Returns the workspace-relative folder that owns todo documents. */
         static fs::path TodoFolder();
 
         /** Builds a collision-safe relative path for a new todo document. */
         static fs::path MakeTodoPath(const SlateWorkspaceContext& workspace, std::string_view title);
+
+        /** Workspace root that owns the cached file results. */
+        mutable fs::path m_cacheRoot;
+
+        /** Cached parse results, indexed by the normalized relative path. */
+        mutable std::unordered_map<std::string, CachedTodoFile> m_fileCache;
     };
 }

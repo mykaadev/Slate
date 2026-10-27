@@ -124,6 +124,7 @@ namespace Software::Slate
         {
             m_mode = SearchMode::FileNames;
         }
+        m_resultsDirty = true;
         m_open = true;
         m_focusInput = true;
     }
@@ -142,6 +143,7 @@ namespace Software::Slate
         m_query.clear();
         m_results.clear();
         m_navigation.Reset();
+        m_resultsDirty = true;
     }
 
     bool SlateSearchOverlayController::IsOpen() const
@@ -166,7 +168,12 @@ namespace Software::Slate
 
     void SlateSearchOverlayController::SetQuery(std::string query, bool resetSelection)
     {
+        if (m_query == query)
+        {
+            return;
+        }
         m_query = std::move(query);
+        m_resultsDirty = true;
         if (resetSelection)
         {
             m_navigation.Reset();
@@ -194,6 +201,7 @@ namespace Software::Slate
         {
             m_results.clear();
             m_navigation.SetCount(0);
+            m_resultsDirty = false;
             return;
         }
 
@@ -208,8 +216,10 @@ namespace Software::Slate
             m_results = m_mode == SearchMode::Recent
                             ? QueryRecentFiles(*workspace, m_query, 100)
                             : workspace->Search().Query(m_query, m_mode, 100);
+            m_resultsRevision = workspace->Search().Revision();
         }
         m_navigation.SetCount(m_results.size());
+        m_resultsDirty = false;
     }
 
     void SlateSearchOverlayController::ActivateSelected(const SearchOverlayCallbacks& callbacks)
@@ -243,12 +253,20 @@ namespace Software::Slate
         }
         const auto& shortcuts = workspace->Shortcuts();
 
-        RefreshResults(context);
+        if (m_scope == SearchOverlayScope::Workspace && m_resultsRevision != workspace->Search().Revision())
+        {
+            m_resultsDirty = true;
+        }
 
         if (m_scope == SearchOverlayScope::Workspace && shortcuts.Pressed(ShortcutAction::SearchMode))
         {
             m_mode = NextWorkspaceSearchMode(m_mode);
             m_navigation.Reset();
+            m_resultsDirty = true;
+        }
+        if (m_resultsDirty)
+        {
+            RefreshResults(context);
         }
         if (shortcuts.Pressed(ShortcutAction::NavigateDown, true))
         {
@@ -316,7 +334,12 @@ namespace Software::Slate
             ImGui::SetKeyboardFocusHere();
             m_focusInput = false;
         }
-        InputTextString("##SearchQuery", m_query, 0);
+        if (InputTextString("##SearchQuery", m_query, 0).edited)
+        {
+            m_navigation.Reset();
+            m_resultsDirty = true;
+            RefreshResults(context);
+        }
         ImGui::Dummy(ImVec2(1.0f, 6.0f));
 
         const bool showQueryHint = m_query.empty() && (documentFind || m_mode != SearchMode::Recent);

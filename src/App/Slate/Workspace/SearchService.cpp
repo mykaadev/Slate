@@ -40,12 +40,49 @@ namespace Software::Slate
 
     void SearchService::Rebuild(const WorkspaceService& workspace)
     {
-        m_files.clear();
+        auto previousFiles = std::move(m_files);
+        std::unordered_map<std::string, std::size_t> previousByPath;
+        previousByPath.reserve(previousFiles.size());
+        for (std::size_t i = 0; i < previousFiles.size(); ++i)
+        {
+            previousByPath.emplace(previousFiles[i].relativePath.generic_u8string(), i);
+        }
+
+        std::vector<IndexedFile> nextFiles;
+        nextFiles.reserve(workspace.MarkdownFiles().size());
+        bool changed = previousFiles.size() != workspace.MarkdownFiles().size();
         for (const auto& relativePath : workspace.MarkdownFiles())
         {
-            std::string text;
-            if (!DocumentService::ReadTextFile(workspace.Resolve(relativePath), &text, nullptr))
+            const auto absolute = workspace.Resolve(relativePath);
+            std::error_code ec;
+            const auto writeTime = fs::last_write_time(absolute, ec);
+            if (ec)
             {
+                changed = true;
+                continue;
+            }
+            const auto fileSize = fs::file_size(absolute, ec);
+            if (ec)
+            {
+                changed = true;
+                continue;
+            }
+
+            const auto previous = previousByPath.find(relativePath.generic_u8string());
+            if (previous != previousByPath.end())
+            {
+                auto& cached = previousFiles[previous->second];
+                if (cached.writeTime == writeTime && cached.fileSize == fileSize)
+                {
+                    nextFiles.push_back(std::move(cached));
+                    continue;
+                }
+            }
+
+            std::string text;
+            if (!DocumentService::ReadTextFile(absolute, &text, nullptr))
+            {
+                changed = true;
                 continue;
             }
 
@@ -53,13 +90,31 @@ namespace Software::Slate
 
             IndexedFile file;
             file.relativePath = relativePath;
+            file.writeTime = writeTime;
+            file.fileSize = fileSize;
             file.lines = MarkdownService::SplitLines(searchableText);
+            file.lowerLines.reserve(file.lines.size());
+            for (const auto& line : file.lines)
+            {
+                file.lowerLines.push_back(PathUtils::ToLower(line));
+            }
             file.title = MarkdownService::TitleFromText(text, relativePath);
             file.lowerPath = PathUtils::ToLower(relativePath.generic_string());
             file.lowerTitle = PathUtils::ToLower(file.title);
-            file.lowerBody = PathUtils::ToLower(searchableText);
-            m_files.push_back(std::move(file));
+            nextFiles.push_back(std::move(file));
+            changed = true;
         }
+
+        m_files = std::move(nextFiles);
+        if (changed)
+        {
+            ++m_revision;
+        }
+    }
+
+    std::uint64_t SearchService::Revision() const
+    {
+        return m_revision;
     }
 
     std::vector<SearchResult> SearchService::Query(const std::string& query, SearchMode mode, std::size_t limit) const
@@ -103,8 +158,7 @@ namespace Software::Slate
 
             for (std::size_t i = 0; i < file.lines.size(); ++i)
             {
-                const std::string lowerLine = PathUtils::ToLower(file.lines[i]);
-                const std::size_t pos = lowerLine.find(needle);
+                const std::size_t pos = file.lowerLines[i].find(needle);
                 if (pos == std::string::npos)
                 {
                     continue;
